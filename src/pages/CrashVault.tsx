@@ -1,0 +1,14 @@
+import { Archive, RefreshCw } from 'lucide-react';
+import { EmptyState, PageHeader, PanelTitle } from '../components/Chrome';
+import type { Workspace } from '../hooks/useWorkspace';
+
+export function CrashVault({workspace}:{workspace:Workspace}) {
+  const crashes=(workspace.detail?.runs || []).filter(run=>run.result.abnormal);
+  return <main className="content"><PageHeader index="06" title="CRASH VAULT" description="Investigate unexpected process termination with preserved evidence."/>
+    <div className="content-rule"><span>TRIAGE WORKFLOW</span><span className="rule-line"/><span>CRASH DOES NOT MEAN EXPLOITABLE</span></div>
+    <section className="panel"><PanelTitle number="01" title="ABNORMAL TERMINATIONS" sub={`${crashes.length} OBSERVED`} action={<Archive size={15}/>}/>
+      {crashes.length?crashes.map(run=>{const file=workspace.detail?.files.find(f=>f.id===run.file_id); const triage=workspace.detail?.triage.find(t=>t.run_id===run.id);return <div className="crash-entry" key={run.id}><div><strong>{file?.name || run.file_id}</strong><span>{run.decoder} / SIGNAL {run.result.signal} / EXIT {run.result.exit_code}</span><p>{triage?triage.result.reproducible?'Same signal reproduced in both reruns.':'Same signal was not reproduced in both reruns.':'Not yet rerun for reproducibility.'}</p>{triage&&<code>{typeof triage.result.reproduction_command==='string'?triage.result.reproduction_command:JSON.stringify(triage.result.reproduction)}</code>}</div><button className="btn btn-secondary" disabled={workspace.busy} onClick={()=>workspace.triage(run.id)}><RefreshCw size={14}/> {triage?'RERUN TRIAGE':'TRIAGE CRASH'}</button></div>;}):<EmptyState title="No abnormal terminations recorded" description="Only real signal-terminated decoder processes appear here. Rejections and timeouts are not crashes."/>}
+    </section>
+    <div className="research-note wide-note"><span>TRIAGE METHOD</span><p>Reruns the same input twice, compares the original input, and records the executable version, limits, logs, and reproduction arguments. Automated delta minimization is not implemented.</p></div>
+  </main>;
+}

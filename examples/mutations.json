@@ -1,0 +1,8 @@
+{
+  "count": 5,
+  "seed": 42,
+  "max_file_size": 33554432,
+  "metadata_size": 8192,
+  "region": "any",
+  "strategies": ["header_boundary", "chunk_length", "truncation", "signature", "trailing"]
+}

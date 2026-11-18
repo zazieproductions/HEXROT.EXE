@@ -1,0 +1,23 @@
+[project]
+name = "hexrot"
+version = "0.1.1"
+description = "Local-first audio format research workstation"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1", "mutagen>=1.47,<2",
+  "python-multipart>=0.0.9,<1", "psutil>=6,<8"
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9", "httpx>=0.27,<1"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

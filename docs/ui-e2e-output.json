@@ -1,0 +1,12 @@
+{
+  "session": "c60e2b670bb246029191e6520faa021c",
+  "sha256": "7a854dbf8865aa2f82e9f39cde4e0af812b053ce1bee077442cbf346c7ed6f1a",
+  "variants": 5,
+  "decoder_runs": 18,
+  "comparison_cases": 6,
+  "report": "JSON exported",
+  "reopened": true,
+  "canceled_worker_pid": 12989,
+  "canceled_job": "canceled",
+  "offline_preview": "real fixture inspected; backend features disabled"
+}
