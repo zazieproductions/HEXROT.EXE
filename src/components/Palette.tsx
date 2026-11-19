@@ -31,7 +31,6 @@ export function CommandPalette({open,onClose,workspace,onPage,onImport}:{open:bo
     if(!q) return commands;
     return commands.filter(c=>`${c.label} ${c.hint||''} ${c.code||''} ${c.group}`.toLowerCase().includes(q));
   },[commands,query]);
-  const grouped = useMemo(()=>results.map((command,index)=>({ command, index })).filter(({command},i,all)=>i===0||all[i-1].command.group!==command.group),[results]);
 
   useEffect(()=>{ if(open){ setQuery(''); setActive(0); window.setTimeout(()=>input.current?.focus(),20); } },[open]);
   useEffect(()=>{ setActive(0); },[query]);
@@ -53,7 +52,7 @@ export function CommandPalette({open,onClose,workspace,onPage,onImport}:{open:bo
         <span className="palette-hint">ESC</span>
       </div>
       <div className="palette-list">
-        {results.length ? grouped.map(({command,index:i})=>{
+        {results.length ? results.map((command,i)=>{
           const Icon=command.icon; const startsGroup=i===0||results[i-1].group!==command.group;
           return <div key={command.id}>
             {startsGroup && <div className="palette-group">{command.group.toUpperCase()}</div>}
