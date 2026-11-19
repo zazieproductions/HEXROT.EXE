@@ -29,6 +29,7 @@ try {
   await page.getByRole('button',{name:/Mutator 03(?:\/07)?/}).click();
   await page.getByRole('button',{name:'GENERATE VARIANTS'}).click();
   await page.waitForFunction(()=>document.querySelectorAll('.case-row').length===5,{timeout:10000});
+  await page.screenshot({path:'docs/screenshots/mutator.png',fullPage:false});
   const files=(await (await fetch(`${api}/sessions/${sid}`)).json()).files;
   assert.equal(files.length,6);
   if(root) assert.equal((await readdir(`${root}/${sid}`)).length,6);
