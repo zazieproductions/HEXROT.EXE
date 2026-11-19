@@ -24,9 +24,9 @@ try {
   await page.getByText('SELECTED: fmt',{exact:true}).waitFor();
   assert.ok(await page.locator('.hex-selected').count()>0);
   await page.screenshot({path:'docs/screenshots/autopsy.png',fullPage:true});
-  await page.getByRole('button',{name:/Metadata 02/}).click();
+  await page.getByRole('button',{name:/Metadata 02(?:\/07)?/}).click();
   await page.getByText('HEXROT reference',{exact:true}).waitFor();
-  await page.getByRole('button',{name:/Mutator 03/}).click();
+  await page.getByRole('button',{name:/Mutator 03(?:\/07)?/}).click();
   await page.getByRole('button',{name:'GENERATE VARIANTS'}).click();
   await page.waitForFunction(()=>document.querySelectorAll('.case-row').length===5,{timeout:10000});
   const files=(await (await fetch(`${api}/sessions/${sid}`)).json()).files;
@@ -36,11 +36,11 @@ try {
   await page.locator('.file-name').filter({hasText:files[1].name}).waitFor();
   await page.getByLabel('Select session file').selectOption(files[0].id);
   await page.locator('.file-name').filter({hasText:files[0].name}).waitFor();
-  await page.getByRole('button',{name:/Mutator 03/}).click();
+  await page.getByRole('button',{name:/Mutator 03(?:\/07)?/}).click();
   await page.locator('.case-row button[title="Compare bytes"]').first().click();
   await page.getByText('BYTE COMPARISON',{exact:true}).waitFor();
   await page.waitForFunction(()=>document.querySelectorAll('.diff-bytes .changed').length>0);
-  await page.getByRole('button',{name:/Decoder Lab 04/}).click();
+  await page.getByRole('button',{name:/Decoder Lab 04(?:\/07)?/}).click();
   await page.getByRole('button',{name:'RUN DECODER TESTS'}).click();
   await page.waitForFunction(()=>document.querySelector('.job-status > div:first-child strong')?.textContent === 'COMPLETED',null,{timeout:60000});
   let detail=await (await fetch(`${api}/sessions/${sid}`)).json();
@@ -51,12 +51,12 @@ try {
   const sndfile=detail.runs.find(r=>r.file_id===signature?.id && r.decoder==='sndfile-info');
   if(sndfile && sndfile.result.stdout.includes('Not able to open input file')) assert.equal(sndfile.result.accepted,false);
   await page.screenshot({path:'docs/screenshots/decoder-lab.png',fullPage:true});
-  await page.getByRole('button',{name:/Differential 05/}).click();
+  await page.getByRole('button',{name:/Differential 05(?:\/07)?/}).click();
   await page.getByText('COMPARISON MATRIX',{exact:true}).waitFor();
   assert.equal(await page.locator('.matrix tbody tr').count(),6);
   await page.locator('.matrix tbody tr').first().click();
   await page.getByText('CASE EVIDENCE',{exact:true}).waitFor();
-  await page.getByRole('button',{name:/Evidence 07/}).click();
+  await page.getByRole('button',{name:/Evidence 07(?:\/07)?/}).click();
   const downloadPromise=page.waitForEvent('download');
   await page.locator('.export-row').filter({hasText:'JSON'}).getByRole('link',{name:'EXPORT'}).click();
   const download=await downloadPromise; const path='/tmp/hexrot-ui-evidence.json'; await download.saveAs(path);
@@ -65,7 +65,7 @@ try {
   await page.reload({waitUntil:'networkidle'}); await page.getByText(sha,{exact:true}).waitFor();
   await page.waitForFunction(id=>document.querySelector('select[aria-label="Open saved research session"]')?.value===id,sid,{timeout:10000});
   detail=await (await fetch(`${api}/sessions/${sid}`)).json(); assert.equal(detail.files.length,6); assert.ok(detail.runs.length>=12);
-  await page.getByRole('button',{name:/Decoder Lab 04/}).click();
+  await page.getByRole('button',{name:/Decoder Lab 04(?:\/07)?/}).click();
   await page.getByLabel('REPEATS').fill('5');
   const jobResponse=page.waitForResponse(response=>response.url().endsWith(`/api/sessions/${sid}/jobs`) && response.request().method()==='POST');
   await page.getByRole('button',{name:'RUN DECODER TESTS'}).click();
@@ -84,7 +84,7 @@ try {
   const offline=await browser.newPage({viewport:{width:1100,height:800}});
   await offline.route(`${api}/**`,route=>route.abort());
   await offline.goto(base,{waitUntil:'networkidle'}); await offline.getByText('BROWSER MODE').waitFor({timeout:10000});
-  await offline.getByText(sha,{exact:true}).waitFor(); await offline.getByRole('button',{name:/Mutator 03/}).click();
+  await offline.getByText(sha,{exact:true}).waitFor(); await offline.getByRole('button',{name:/Mutator 03(?:\/07)?/}).click();
   assert.equal(await offline.getByRole('button',{name:'GENERATE VARIANTS'}).isDisabled(),true); await offline.close();
   console.log(JSON.stringify({session:sid,sha256:sha,variants:files.length-1,decoder_runs:detail.runs.length,comparison_cases:6,report:'JSON exported',reopened:true,canceled_worker_pid:activeWorker,canceled_job:canceled.status,offline_preview:'real fixture inspected; backend features disabled'},null,2));
 } finally { await browser.close(); }

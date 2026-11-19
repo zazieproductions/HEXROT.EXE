@@ -37,7 +37,7 @@ A local-first audio-format research workstation for real bytes, deterministic va
 | Plane | State in this checkout | What that means |
 |---|---|---|
 | 🟩 Backend core | **Verified** | `50 passed, 6 skipped` in about `1.4 s`; parsers, mutation, API, storage, reports exercised with real bytes |
-| 🟩 Frontend | **Verified** | `tsc --noEmit` clean; Vite production build `1,053.79 kB` (`652.33 kB` gzip) |
+| 🟩 Frontend | **Verified** | `tsc --noEmit` clean; Vite production build `844.28 kB` (`476.85 kB` gzip) |
 | 🟦 Browser-only preview | **Implemented; not E2E-tested here** | Bounded RIFF/AIFF inspection in memory; no persistence, no mutation files, no decoder jobs |
 | 🟨 Decoder execution | **Gated, not exercised here** | Requires a passing sandbox self-test plus an allowlisted decoder; both absent in this container |
 | 🟨 Linux integration | **Code-complete, not run here** | Four sandbox tests skipped because `bubblewrap` is unavailable |
@@ -206,6 +206,18 @@ With the backend connected, **Import File** always creates a new session with yo
 
 > **Browser-only mode** starts automatically when the API is unreachable. It fetches the bundled `reference.wav`, parses a bounded RIFF/AIFF subset in memory, and disables mutation, decoder, triage, and persistent export. It does not inspect FLAC/MP3 deeply and creates no SQLite session.
 
+### ⌨️ Terminal keyboard layer
+
+The interface is styled as a green-phosphor terminal, but every control is still a normal button, input, or link — the shortcuts are an accelerator, not a requirement.
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl`/`⌘` + `K` or `?` | Open the command palette (navigate modules, import, load sample, generate variants, run decoders, jump to exports) |
+| `↑` `↓` / `↵` / `esc` | Move through palette commands, execute the highlighted one, or dismiss it |
+| `` ` `` | Toggle the system console drawer (mirrors engine, session, and error events; no fabricated telemetry) |
+
+Other touches that are purely presentational and change no behavior: a ~1 s boot sequence (click or press a key to skip), a CRT scanline/vignette overlay, and a status bar that shows `LINK::ESTABLISHED` once the local API answers. Scanlines, the sweep, and animations are disabled under `prefers-reduced-motion`.
+
 ---
 
 <a id="architecture"></a>
@@ -233,7 +245,7 @@ With the backend connected, **Import File** always creates a new session with yo
 | Build | Vite, `@vitejs/plugin-react`, `vite-plugin-singlefile` | `7.3.7` / single-file production bundle |
 | Language | TypeScript | `5.9.3`, strict |
 | Styling | Tailwind CSS, `@tailwindcss/vite`, `clsx`, `tailwind-merge` | `4.1.17` |
-| UI icons/fonts | `lucide-react`, IBM Plex Mono, Space Grotesk | Bundled locally |
+| UI icons/fonts | `lucide-react`, IBM Plex Mono (monospace terminal UI) | Bundled locally |
 | API | FastAPI, Pydantic, Uvicorn | `>=0.115`, `>=0.30` |
 | Storage | Python `sqlite3` (WAL) | Standard library |
 | Media metadata | Mutagen | `>=1.47` |
