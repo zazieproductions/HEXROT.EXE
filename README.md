@@ -28,7 +28,7 @@ A local-first audio-format research workstation for real bytes, deterministic va
 
 ---
 
-## 🟩 At a glance
+## At a glance
 
 | `0.2.0` | `56` | `50 / 6` | `16` | `3` | `15` | `7` |
 |:--:|:--:|:--:|:--:|:--:|:--:|:--:|
@@ -36,40 +36,40 @@ A local-first audio-format research workstation for real bytes, deterministic va
 
 | Plane | State in this checkout | What that means |
 |---|---|---|
-| 🟩 Backend core | **Verified** | `50 passed, 6 skipped` in about `1.4 s`; parsers, mutation, API, storage, reports exercised with real bytes |
-| 🟩 Frontend | **Verified** | `tsc --noEmit` clean; Vite production build `844.28 kB` (`476.85 kB` gzip) |
-| 🟦 Browser-only preview | **Implemented; not E2E-tested here** | Bounded RIFF/AIFF inspection in memory; no persistence, no mutation files, no decoder jobs |
-| 🟨 Decoder execution | **Gated, not exercised here** | Requires a passing sandbox self-test plus an allowlisted decoder; both absent in this container |
-| 🟨 Linux integration | **Code-complete, not run here** | Four sandbox tests skipped because `bubblewrap` is unavailable |
-| 🟥 macOS / ARM64 | **Unverified** | Deny-by-default Seatbelt profile exists; no Mac was used in this revision |
-| 🟨 CI matrix | **Configured, not observed here** | Workflow defines seven jobs; no CI run is claimed by this document |
+| <span style="color:#2fe58f">●</span> Backend core | **Verified** | `50 passed, 6 skipped` in about `1.4 s`; parsers, mutation, API, storage, reports exercised with real bytes |
+| <span style="color:#2fe58f">●</span> Frontend | **Verified** | `tsc --noEmit` clean; Vite production build `844.28 kB` (`476.85 kB` gzip) |
+| <span style="color:#5fe6ff">●</span> Browser-only preview | **Implemented; not E2E-tested here** | Bounded RIFF/AIFF inspection in memory; no persistence, no mutation files, no decoder jobs |
+| <span style="color:#ffb454">●</span> Decoder execution | **Gated, not exercised here** | Requires a passing sandbox self-test plus an allowlisted decoder; both absent in this container |
+| <span style="color:#ffb454">●</span> Linux integration | **Code-complete, not run here** | Four sandbox tests skipped because `bubblewrap` is unavailable |
+| <span style="color:#ff5468">●</span> macOS / ARM64 | **Unverified** | Deny-by-default Seatbelt profile exists; no Mac was used in this revision |
+| <span style="color:#ffb454">●</span> CI matrix | **Configured, not observed here** | Workflow defines seven jobs; no CI run is claimed by this document |
 
-### 🎨 How to read the color coding
+### How to read the color coding
 
 | Swatch | Lane | Applies to |
 |:--:|---|---|
-| 🟩 | **Verified facts** | Source-backed behavior, tests, hashes, parsed fields, local build output |
-| 🟦 | **Interface & flow** | Browser modules, API endpoints, quickstart, operations |
-| 🟪 | **Transformation** | Architecture internals, mutation engine, data model |
-| 🟨 | **Evidence & interpretation** | Differential findings, triage, exports, confidence, caveats |
-| 🟥 | **Risk & execution** | Sandbox, guardrails, hard limits, threat model |
+| <span style="color:#2fe58f">●</span> | **Verified facts** | Source-backed behavior, tests, hashes, parsed fields, local build output |
+| <span style="color:#5fe6ff">●</span> | **Interface & flow** | Browser modules, API endpoints, quickstart, operations |
+| <span style="color:#b99cff">●</span> | **Transformation** | Architecture internals, mutation engine, data model |
+| <span style="color:#ffb454">●</span> | **Evidence & interpretation** | Differential findings, triage, exports, confidence, caveats |
+| <span style="color:#ff5468">●</span> | **Risk & execution** | Sandbox, guardrails, hard limits, threat model |
 
 Diagrams use the same palette: **cyan** presentation, **green** verified local facts, **purple** deterministic transformation, **amber** evidence/interpretation, **red** execution/risk.
 
 ---
 
-## 📚 Contents
+## Contents
 
 | # | Section | # | Section |
 |:--:|---|---|:--|
-| 01 | [🟩 What it is — and is not](#what-it-is) | 09 | [🟦 API reference](#api-reference) |
-| 02 | [🟦 Quickstart](#quickstart) | 10 | [🟥 Security, limits & threat model](#security-model) |
-| 03 | [🟪 Architecture](#architecture) | 11 | [🟩 Verification & CI](#verification) |
-| 04 | [🟦 The evidence pipeline](#workflow) | 12 | [🟦 Operations & troubleshooting](#operations) |
-| 05 | [🟪 Mutation engine](#mutation) | 13 | [🟪 Repository map](#repository-map) |
-| 06 | [🟥 Decoders & isolation](#decoders--isolation) | 14 | [🟪 Roadmap](#roadmap) |
-| 07 | [🟨 Differential & triage](#differential--triage) | 15 | [🟨 Changelog](#changelog) |
-| 08 | [🟨 Evidence exports](#evidence) | 16 | [🟩 Glossary & references](#glossary) |
+| 01 | <span style="color:#2fe58f">●</span> [What it is — and is not](#what-it-is) | 09 | <span style="color:#5fe6ff">●</span> [API reference](#api-reference) |
+| 02 | <span style="color:#5fe6ff">●</span> [Quickstart](#quickstart) | 10 | <span style="color:#ff5468">●</span> [Security, limits & threat model](#security-model) |
+| 03 | <span style="color:#b99cff">●</span> [Architecture](#architecture) | 11 | <span style="color:#2fe58f">●</span> [Verification & CI](#verification) |
+| 04 | <span style="color:#5fe6ff">●</span> [The evidence pipeline](#workflow) | 12 | <span style="color:#5fe6ff">●</span> [Operations & troubleshooting](#operations) |
+| 05 | <span style="color:#b99cff">●</span> [Mutation engine](#mutation) | 13 | <span style="color:#b99cff">●</span> [Repository map](#repository-map) |
+| 06 | <span style="color:#ff5468">●</span> [Decoders & isolation](#decoders--isolation) | 14 | <span style="color:#b99cff">●</span> [Roadmap](#roadmap) |
+| 07 | <span style="color:#ffb454">●</span> [Differential & triage](#differential--triage) | 15 | <span style="color:#ffb454">●</span> [Changelog](#changelog) |
+| 08 | <span style="color:#ffb454">●</span> [Evidence exports](#evidence) | 16 | <span style="color:#2fe58f">●</span> [Glossary & references](#glossary) |
 
 <details>
 <summary><strong>Documentation map — where each claim comes from</strong></summary>
@@ -91,7 +91,7 @@ Diagrams use the same palette: **cyan** presentation, **green** verified local f
 ---
 
 <a id="what-it-is"></a>
-## 🟩 01 · What it is — and is not
+## 01 · What it is — and is not
 
 ### The design contract
 
@@ -102,7 +102,7 @@ Diagrams use the same palette: **cyan** presentation, **green** verified local f
 5. **Interpretation is conservative.** Acceptance, rejection, timeout, resource limit, signal termination, and infrastructure error are distinct outcomes.
 6. **Local first.** No remote upload, telemetry endpoint, cloud key, or remote model call exists. The only upload target is the loopback API.
 
-| ✅ HEXROT.EXE does | ⛔ HEXROT.EXE does not |
+| HEXROT.EXE does | HEXROT.EXE does not |
 |---|---|
 | Parse RIFF/WAVE, AIFF/AIFC, FLAC metadata blocks, MP3/ID3 structures | Claim exhaustive format validation |
 | Compute SHA-256 over exact file bytes | Treat a hash as a trust verdict |
@@ -117,7 +117,7 @@ Diagrams use the same palette: **cyan** presentation, **green** verified local f
 ---
 
 <a id="quickstart"></a>
-## 🟦 02 · Quickstart
+## 02 · Quickstart
 
 ### Requirements
 
@@ -206,7 +206,7 @@ With the backend connected, **Import File** always creates a new session with yo
 
 > **Browser-only mode** starts automatically when the API is unreachable. It fetches the bundled `reference.wav`, parses a bounded RIFF/AIFF subset in memory, and disables mutation, decoder, triage, and persistent export. It does not inspect FLAC/MP3 deeply and creates no SQLite session.
 
-### ⌨️ Terminal keyboard layer
+### Terminal keyboard layer
 
 The interface is styled as a green-phosphor terminal, but every control is still a normal button, input, or link — the shortcuts are an accelerator, not a requirement.
 
@@ -221,7 +221,7 @@ Other touches that are purely presentational and change no behavior: a ~1 s boot
 ---
 
 <a id="architecture"></a>
-## 🟪 03 · Architecture
+## 03 · Architecture
 
 <div align="center">
   <img src="docs/diagrams/architecture.svg" alt="Four-plane HEXROT.EXE architecture: browser, loopback API, core, OS sandbox" width="100%"/>
@@ -366,7 +366,7 @@ erDiagram
 ---
 
 <a id="workflow"></a>
-## 🟦 04 · The evidence pipeline
+## 04 · The evidence pipeline
 
 <div align="center">
   <img src="docs/diagrams/workflow.svg" alt="Eight-stage HEXROT.EXE pipeline from import to evidence export" width="100%"/>
@@ -457,7 +457,7 @@ All contain harmless synthesized PCM or text. Expectations are asserted by `test
 ---
 
 <a id="mutation"></a>
-## 🟪 05 · Mutation engine
+## 05 · Mutation engine
 
 The engine applies **seeded, bounded byte edits to a copy** of the original. It does not append exploit payloads, run fuzzers, or mutate the stored original.
 
@@ -597,7 +597,7 @@ Every history record contains:
 ---
 
 <a id="decoders--isolation"></a>
-## 🟥 06 · Decoders & isolation
+## 06 · Decoders & isolation
 
 ### Compatibility matrix
 
@@ -680,7 +680,7 @@ The host records `abnormal: true`, `signal: 11`, and keeps `exit_code: -11`. A n
 ---
 
 <a id="differential--triage"></a>
-## 🟨 07 · Differential & triage
+## 07 · Differential & triage
 
 ### What the comparison actually checks
 
@@ -771,7 +771,7 @@ flowchart TD
 ---
 
 <a id="evidence"></a>
-## 🟨 08 · Evidence exports
+## 08 · Evidence exports
 
 ### Formats
 
@@ -824,7 +824,7 @@ Sessions live in SQLite under `HEXROT_HOME`. Restarting the API does not lose fi
 ---
 
 <a id="api-reference"></a>
-## 🟦 09 · API reference
+## 09 · API reference
 
 Base URL: `http://127.0.0.1:8000/api`. All responses are JSON unless a file/report is returned.
 
@@ -924,7 +924,7 @@ The service has **no authentication**. It assumes a trusted local user and does 
 ---
 
 <a id="security-model"></a>
-## 🟥 10 · Security, limits & threat model
+## 10 · Security, limits & threat model
 
 <div align="center">
   <img src="docs/diagrams/guardrails.svg" alt="Enforced guardrails: input, runtime, output and storage ceilings" width="100%"/>
@@ -995,7 +995,7 @@ Report suspected issues privately via the repository's security advisory mechani
 ---
 
 <a id="verification"></a>
-## 🟩 11 · Verification & CI
+## 11 · Verification & CI
 
 <div align="center">
   <img src="docs/diagrams/verification.svg" alt="Verification matrix: 56 collected, 50 passed, 6 skipped, and seven CI jobs" width="100%"/>
@@ -1088,7 +1088,7 @@ python docs/diagrams/generate_diagrams.py   # deterministic SVG regeneration
 ---
 
 <a id="operations"></a>
-## 🟦 12 · Operations & troubleshooting
+## 12 · Operations & troubleshooting
 
 ### Health checks
 
@@ -1147,7 +1147,7 @@ Never point `HEXROT_HOME` at a directory containing unrelated files.
 ---
 
 <a id="repository-map"></a>
-## 🟪 13 · Repository map
+## 13 · Repository map
 
 ```text
 HEXROT.EXE/
@@ -1215,7 +1215,7 @@ HEXROT.EXE/
 ---
 
 <a id="roadmap"></a>
-## 🟪 14 · Roadmap
+## 14 · Roadmap
 
 ### Shipped in 0.2.0
 
@@ -1250,7 +1250,7 @@ HEXROT.EXE/
 ---
 
 <a id="changelog"></a>
-## 🟨 15 · Changelog
+## 15 · Changelog
 
 ### Documentation revision — 2026-11-19 (working tree)
 
@@ -1292,7 +1292,7 @@ HEXROT.EXE/
 ---
 
 <a id="glossary"></a>
-## 🟩 16 · Glossary & references
+## 16 · Glossary & references
 
 | Term | Meaning here |
 |---|---|
