@@ -32,11 +32,20 @@ def test_full_persistent_research_workflow(tmp_path):
     assert [c['name'] for c in a['chunks']]==['RIFF','fmt ','LIST','data'] and len(a['metadata'])==3
     response=client.post(f'/api/sessions/{sid}/mutations',json={'count':5,'seed':42})
     assert response.status_code==200
-    variants=response.json()['files']; assert len(variants)==5
+    mutation_response = response.json()
+    variants=mutation_response['files']; assert len(variants)==5
+    # Verify manifest is included
+    assert 'manifest' in mutation_response
+    manifest = mutation_response['manifest']
+    assert manifest['count_generated'] == 5
+    assert manifest['seed'] == 42
+    assert manifest['original_sha256'] == a['sha256']
     for variant in variants:
         internal=app.state.db.get_file(sid,variant['id'],True)
         assert Path(internal['path']).exists() and Path(internal['path']).read_bytes()!=original
         assert variant['mutation']['edits']
+        # v0.2.0: mutation history includes reproduction inputs
+        assert 'reproduction_inputs' in variant['mutation']
     compare=client.get(f"/api/sessions/{sid}/files/{variants[0]['id']}/compare?offset=0&length=64").json()
     assert compare['changed_offsets'] and base64.b64decode(compare['original'])==original[:64]
     available=[x['id'] for x in inventory() if x['available'] and x['id'] in ('ffmpeg','sndfile-info')]
@@ -108,3 +117,98 @@ def test_html_report_escapes_file_metadata(tmp_path):
     sid=client.post('/api/sessions/upload',files={'file':('text.wav',data,'audio/wav')}).json()['session']['id']
     report=client.get(f'/api/sessions/{sid}/report?format=html').text
     assert '&lt;script&gt;alert(1)' in report and '<script>alert(1)' not in report
+
+
+# --- v0.2.0 API contract tests ---
+
+def test_health_returns_version_and_strategies(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    health = client.get('/api/health').json()
+    assert health['version'] == '0.2.0'
+    assert 'strategies' in health['limits']
+    assert 'boundary_min' in health['limits']['strategies']
+    assert 'header_boundary' in health['limits']['strategies']
+
+
+def test_mutation_endpoint_returns_manifest(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    sid = client.post('/api/sessions/demo').json()['session']['id']
+    response = client.post(f'/api/sessions/{sid}/mutations', json={
+        'count': 3, 'seed': 7, 'strategies': ['header_boundary', 'truncation'],
+        'deduplicate': True
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert 'files' in body and 'manifest' in body
+    manifest = body['manifest']
+    assert manifest['seed'] == 7
+    assert manifest['count_requested'] == 3
+    assert manifest['deduplicated'] is True
+    assert manifest['original_sha256']
+
+
+def test_mutation_deduplication_skips_duplicates(tmp_path):
+    """When deduplicate=True, identical outputs should be skipped."""
+    client = TestClient(create_app(tmp_path))
+    sid = client.post('/api/sessions/demo').json()['session']['id']
+    # 'signature' always produces the same output (replaces first 4 bytes with 'XROT')
+    response = client.post(f'/api/sessions/{sid}/mutations', json={
+        'count': 5, 'seed': 1, 'strategies': ['signature'], 'deduplicate': True
+    })
+    assert response.status_code == 200
+    body = response.json()
+    # All 5 attempts produce the same hash; only 1 survives dedup
+    assert len(body['files']) == 1
+    assert body['manifest']['count_generated'] == 1
+
+
+def test_mutation_no_deduplication_returns_all(tmp_path):
+    """When deduplicate=False, all mutations are returned even if identical."""
+    client = TestClient(create_app(tmp_path))
+    sid = client.post('/api/sessions/demo').json()['session']['id']
+    response = client.post(f'/api/sessions/{sid}/mutations', json={
+        'count': 3, 'seed': 1, 'strategies': ['signature'], 'deduplicate': False
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body['files']) == 3
+
+
+def test_mutation_history_has_reproduction_data(tmp_path):
+    """Each mutation's history must contain reproduction_inputs for replay."""
+    client = TestClient(create_app(tmp_path))
+    sid = client.post('/api/sessions/demo').json()['session']['id']
+    response = client.post(f'/api/sessions/{sid}/mutations', json={
+        'count': 1, 'seed': 42, 'strategies': ['header_boundary']
+    })
+    body = response.json()
+    file = body['files'][0]
+    mutation = file['mutation']
+    assert 'reproduction_inputs' in mutation
+    ri = mutation['reproduction_inputs']
+    assert ri['seed'] == 42
+    assert ri['strategy'] == 'header_boundary'
+    assert ri['original_sha256'] == mutation['original_sha256']
+
+
+def test_unknown_strategy_returns_422(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    sid = client.post('/api/sessions/demo').json()['session']['id']
+    response = client.post(f'/api/sessions/{sid}/mutations', json={
+        'count': 1, 'strategies': ['nonexistent_strategy']
+    })
+    assert response.status_code == 422
+
+
+def test_boundary_strategies_via_api(tmp_path):
+    """New boundary strategies should work through the API."""
+    client = TestClient(create_app(tmp_path))
+    sid = client.post('/api/sessions/demo').json()['session']['id']
+    for strategy in ['boundary_min', 'boundary_max', 'boundary_off_by_one', 'zero_length_field', 'negative_duration']:
+        response = client.post(f'/api/sessions/{sid}/mutations', json={
+            'count': 1, 'seed': 1, 'strategies': [strategy]
+        })
+        assert response.status_code == 200, f'{strategy} failed: {response.text}'
+        body = response.json()
+        assert len(body['files']) == 1
+        assert body['files'][0]['mutation']['strategy'] == strategy

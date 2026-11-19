@@ -18,3 +18,18 @@ dist/
 coverage/
 playwright-report/
 test-results/
+
+# Generated mutations and temporary research artifacts
+*.mut
+*.tmp
+*.bak
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS artifacts
+Thumbs.db
+ehthumbs.db

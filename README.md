@@ -12,10 +12,10 @@ This is a research prototype, not a hardened malware-analysis appliance. The bro
 
 - Parse RIFF/WAVE, AIFF/AIFC, FLAC metadata blocks, and MP3/ID3 structures; calculate SHA-256, inspect exact byte ranges, report declared versus available lengths, and flag known structural irregularities.
 - Extract RIFF INFO and AIFF text directly, and use Mutagen for supported ID3, Vorbis comments, artwork fingerprints, and audio properties. Heuristics are labeled separately from extracted facts.
-- Generate up to 50 variants per request using a seed, selectable strategies, selected byte regions, a file-size limit, and a metadata-value limit. Changes and their offsets are recorded; the original is retained.
+- Generate up to 50 variants per request using a seed, selectable strategies (including boundary-value, format-aware, and metadata strategies), selected byte regions, a file-size limit, and a metadata-value limit. Changes and their offsets are recorded with exact byte hashes; the original is retained. Hash-based deduplication skips identical outputs.
 - Run allowlisted FFmpeg, ffprobe, and `sndfile-info` adapters only after an OS sandbox self-test. Collect actual output, exit or signal status, runtime, sampled resources, and FFmpeg's decoded-stream SHA-256.
 - Compare observed acceptance, reported channels/duration, output hashes, repeat outcomes, resource limits, and abnormal termination. A rejection or crash is not proof of a vulnerability.
-- Rerun an observed signal termination twice, test the original input, preserve evidence, and record reproduction arguments. Export JSON, Markdown, or HTML and reopen SQLite-backed sessions.
+- Rerun an observed signal termination twice, test the original input, preserve evidence, record reproduction arguments, and run bounded delta debugging to identify contributing edits. Export JSON, Markdown, or HTML and reopen SQLite-backed sessions.
 
 ## Install on Apple Silicon macOS
 
@@ -80,6 +80,17 @@ The API is intended for loopback only, restricts browser origins and Host header
 
 The standard-library parsers and Mutagen run in the local backend process, not in the decoder sandbox. Decoder resource limits are set inside the isolated supervisor before spawning the decoder, avoiding Python pre-exec hooks in worker threads. Resource limits include hard per-process address-space/CPU/file-size/process-count limits, a wall-clock timeout, and sampled process-tree monitoring; sampling can miss short peaks, and these are not cgroup-wide hard quotas. Run high-risk material on a disposable, isolated machine. See [SECURITY.md](SECURITY.md) and [architecture](docs/architecture.md).
 
+## Changes in 0.2.0
+
+- Added six new boundary-value mutation strategies (`boundary_min`, `boundary_max`, `boundary_off_by_one`, `zero_length_field`, `max_syncsafe`, `negative_duration`) for format-aware chunk-level testing.
+- Added hash-based deduplication in batch mutation generation to skip variants whose output is byte-identical to a previous result.
+- Every mutation now records a structured `reproduction_inputs` manifest so any output can be replayed from (original SHA-256, seed, strategy, index, region, limits).
+- Added bounded delta debugging to crash triage: when a crash is reproducible and the input was a mutation, the triage endpoint tests which edits contribute to the failure.
+- Tightened the macOS `sandbox-exec` worker profile to deny `process-fork` globally, restrict `file-write*` to `/dev/null`, and allowlist only the interpreter binary, decoder binary, input file, and supervisor.
+- Added 30+ malformed-input parser tests covering empty files, truncated headers, zero-length chunks, oversized declared lengths, duplicate chunk IDs, encoding errors, and garbage inputs.
+- Expanded CI with separate Linux sandbox, macOS, no-sandbox, mutation-reproducibility, parser-resilience, and API-contract jobs.
+- Bumped the API and frontend to 0.2.0.
+
 ## Changes in 0.1.1
 
 - Moved decoder resource limits into the sandbox supervisor, avoiding `preexec_fn` in worker threads.
@@ -96,6 +107,13 @@ python -m pytest -q
 npx tsc --noEmit
 npm run build
 ```
+
+Tests are organized in three tiers:
+- `tests/unit/` — Parser resilience (malformed inputs, boundary values), mutation engine (determinism, deduplication, reproducibility), supervisor rlimits.
+- `tests/integration/` — Sandbox isolation (Linux bubblewrap, macOS sandbox-exec), decoder execution with real subprocesses, network/file access restrictions.
+- `tests/end_to_end/` — Full API workflow, mutation manifest, report export, cancellation, path safety, HTML escaping.
+
+Sandbox-dependent tests are automatically skipped when `bubblewrap` (Linux) or `sandbox-exec` (macOS) is unavailable. They are not treated as passed security tests.
 
 With the local backend and frontend running, Chromium installed, and `HEXROT_HOME` pointing at a disposable test workspace:
 

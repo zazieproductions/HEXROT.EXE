@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from backend.analysis.differential import compare
 from backend.config import MAX_FILE_SIZE, MAX_METADATA_VALUE, MAX_MUTATIONS
 from backend.decoders.adapters import inventory
-from backend.mutation.engine import DEFAULT_STRATEGIES, STRATEGIES, MutationError, generate
+from backend.mutation.engine import DEFAULT_STRATEGIES, STRATEGIES, MutationError, generate, generate_batch
 from backend.reports.export import bundle, render
 from backend.storage.database import Database
 from backend.workers.isolation import isolation_status
@@ -21,7 +21,7 @@ from backend.workers.jobs import JobManager
 from backend.workers.runner import execute
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCAL_ORIGIN = r'^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$'
+LOCAL_ORIGIN = r'^https?://(localhost|127\.0\.0\.1|\\[::1\\])(:\\d+)?$'
 
 
 class RequestSizeLimit:
@@ -60,10 +60,11 @@ class RequestSizeLimit:
 class MutationRequest(BaseModel):
     count: int = Field(default=5,ge=1,le=MAX_MUTATIONS)
     seed: int = Field(default=42,ge=0,le=2**32-1)
-    strategies: list[str] = Field(default_factory=lambda: DEFAULT_STRATEGIES.copy(),min_length=1,max_length=10)
+    strategies: list[str] = Field(default_factory=lambda: DEFAULT_STRATEGIES.copy(),min_length=1,max_length=16)
     max_file_size: int = Field(default=MAX_FILE_SIZE,ge=1,le=MAX_FILE_SIZE)
     metadata_size: int = Field(default=8192,ge=0,le=MAX_METADATA_VALUE)
     region: str = Field(default='any',max_length=100)
+    deduplicate: bool = Field(default=True, description='Skip mutations whose output hash matches a previous result')
 
 
 class JobRequest(BaseModel):
@@ -75,7 +76,7 @@ class JobRequest(BaseModel):
 
 
 def create_app(db_root: Path | None = None) -> FastAPI:
-    app = FastAPI(title='HEXROT.EXE local API',version='0.1.1')
+    app = FastAPI(title='HEXROT.EXE local API',version='0.2.0')
     db = Database(db_root); jobs = JobManager(db)
     app.state.db = db; app.state.jobs = jobs
     app.add_middleware(CORSMiddleware,allow_origin_regex=LOCAL_ORIGIN,allow_credentials=False,allow_methods=['GET','POST'],allow_headers=['Content-Type'])
@@ -105,8 +106,8 @@ def create_app(db_root: Path | None = None) -> FastAPI:
 
     @app.get('/api/health')
     def health():
-        return {'status':'online','version':'0.1.1','isolation':isolation_status(),'decoders':inventory(),
-                'limits':{'max_file_size':MAX_FILE_SIZE,'max_mutations':MAX_MUTATIONS}}
+        return {'status':'online','version':'0.2.0','isolation':isolation_status(),'decoders':inventory(),
+                'limits':{'max_file_size':MAX_FILE_SIZE,'max_mutations':MAX_MUTATIONS,'strategies':sorted(STRATEGIES)}}
 
     @app.get('/api/sessions')
     def sessions(): return db.list_sessions()
@@ -170,14 +171,22 @@ def create_app(db_root: Path | None = None) -> FastAPI:
         if not original: raise HTTPException(404,'Original not found')
         data = Path(original['path']).read_bytes()
         if len(data)>request.max_file_size: raise HTTPException(422,'Original exceeds configured size limit')
-        outputs = []
-        try:
-            for i in range(request.count):
-                outputs.append(generate(data,original['analysis'],request.strategies[i%len(request.strategies)],request.seed,i,request.max_file_size,request.region,request.metadata_size))
-        except MutationError as exc: raise HTTPException(422,str(exc)) from exc
+        outputs = generate_batch(data, original['analysis'], request.count, request.seed,
+                                  request.strategies, request.max_file_size, request.region,
+                                  request.metadata_size, deduplicate=request.deduplicate)
         stem = Path(original['name']).stem; ext = Path(original['name']).suffix or '.bin'
-        return {'files':[db.add_file(sid,f'{stem}__s{request.seed}_m{i+1:02d}{ext}',out,'mutation',history)
-                         for i,(out,history) in enumerate(outputs)]}
+        files = []
+        for i,(out,history) in enumerate(outputs):
+            files.append(db.add_file(sid, f'{stem}__s{request.seed}_m{i+1:02d}{ext}', out, 'mutation', history))
+        manifest = {
+            'session_id': sid, 'seed': request.seed, 'count_requested': request.count,
+            'count_generated': len(files), 'deduplicated': request.deduplicate,
+            'strategies': request.strategies, 'max_file_size': request.max_file_size,
+            'metadata_size': request.metadata_size, 'region': request.region,
+            'original_sha256': history['original_sha256'] if history else None,
+            'output_hashes': [f['analysis']['sha256'] for f in files],
+        }
+        return {'files': files, 'manifest': manifest}
 
     @app.post('/api/sessions/{sid}/jobs')
     def start_job(sid: str, request: JobRequest):
@@ -223,13 +232,90 @@ def create_app(db_root: Path | None = None) -> FastAPI:
         original = next((f for f in db.list_files(sid,True) if f['kind']=='original'),None)
         if not original: raise HTTPException(404,'Original not found')
         limits = run['result']['limits']
+        # Reproduce: rerun the suspected crash twice
         repeated = [execute(Path(file['path']),run['decoder'],limits['timeout_seconds'],limits['memory_mb']) for _ in range(2)]
         baseline = execute(Path(original['path']),run['decoder'],limits['timeout_seconds'],limits['memory_mb'])
         reproducible = all(r['abnormal'] and r['signal']==run['result']['signal'] for r in repeated)
         reproduction = [('<INPUT>' if arg in ('/input/audio', file['path']) else arg) for arg in run['result']['invocation']]
-        return db.add_triage(sid,run_id,{'reproducible':reproducible,'original_run':run['result'],'repeats':repeated,'baseline':baseline,
-                                        'mutation':file['mutation'],'reproduction':reproduction,'reproduction_command':shlex.join(reproduction),
-                                        'note':'A crash is an observation, not proof of memory corruption or code execution.'})
+        # Basic delta debugging: if the file is a mutation, try to identify which edit matters
+        minimization = None
+        if reproducible and file.get('mutation') and file['mutation'].get('edits'):
+            minimization = _basic_delta_debug(file, original, run['decoder'], limits)
+        return db.add_triage(sid,run_id,{
+            'reproducible':reproducible,
+            'original_run':run['result'],
+            'repeats':repeated,
+            'baseline':baseline,
+            'mutation':file['mutation'],
+            'reproduction':reproduction,
+            'reproduction_command':shlex.join(reproduction),
+            'minimization': minimization,
+            'note':'A crash is an observation, not proof of memory corruption or code execution.',
+            'decoder_version': run['result'].get('version'),
+            'exit_status': run['result'].get('exit_code'),
+            'signal': run['result'].get('signal'),
+            'resource_exceeded': run['result'].get('resource_exceeded'),
+            'is_resource_limit': bool(run['result'].get('resource_exceeded')),
+        })
+
+    def _basic_delta_debug(mutated_file: dict, original_file: dict, decoder: str, limits: dict) -> dict:
+        """Bounded delta debugging: test individual edit groups to narrow the failure-inducing change.
+
+        This is a simplified approach: we undo one edit at a time and check if the crash still occurs.
+        It does not explore all 2^n subsets but identifies the most impactful edits.
+        """
+        import hashlib as _hashlib
+        mutation = mutated_file['mutation']
+        if not mutation or not mutation.get('edits'):
+            return None
+        edits = mutation['edits']
+        if len(edits) > 20:
+            return {'method': 'basic_delta_debug', 'note': 'Too many edits for bounded analysis', 'edit_count': len(edits)}
+        original_data = Path(original_file['path']).read_bytes()
+        timeout = limits['timeout_seconds']
+        memory_mb = limits['memory_mb']
+        # Replay original edits, dropping one at a time
+        results = []
+        for drop_idx in range(len(edits)):
+            # Rebuild with all edits except drop_idx
+            candidate = bytearray(original_data)
+            kept_edits = []
+            for idx, edit in enumerate(edits):
+                if idx == drop_idx:
+                    continue
+                offset = edit['offset']
+                old_len = edit['old_length']
+                new_hex = edit['after_hex']
+                new_bytes = bytes.fromhex(new_hex)
+                if offset + old_len <= len(candidate):
+                    candidate[offset:offset+old_len] = new_bytes
+                    kept_edits.append(edit)
+            candidate_bytes = bytes(candidate)
+            # Write to temp and test
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.bin') as tmp:
+                tmp.write(candidate_bytes)
+                tmp_path = Path(tmp.name)
+            try:
+                result = execute(tmp_path, decoder, timeout, memory_mb)
+                still_crashes = result['abnormal'] and result['signal'] == mutation.get('signal')
+                results.append({
+                    'dropped_edit_index': drop_idx,
+                    'dropped_edit_description': edits[drop_idx].get('description', ''),
+                    'still_crashes': still_crashes,
+                    'exit_code': result.get('exit_code'),
+                    'signal': result.get('signal'),
+                })
+            finally:
+                tmp_path.unlink(missing_ok=True)
+        critical_edits = [r for r in results if not r['still_crashes']]
+        return {
+            'method': 'basic_delta_debug',
+            'edit_count': len(edits),
+            'edits_tested': len(results),
+            'critical_edits': critical_edits,
+            'note': 'Dropped one edit at a time; edits where removing them prevents the crash are likely contributing factors.',
+        }
 
     @app.get('/api/sessions/{sid}/report')
     def report(sid: str, format: Literal['json','md','html']='json'):
