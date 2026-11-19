@@ -22,6 +22,45 @@ def linux_base() -> list[str]:
     return args
 
 
+def _macos_self_test_profile() -> str:
+    """Minimal deny-by-default profile for the /usr/bin/true self-test only."""
+    return ('(version 1)(deny default)'
+            '(allow process-exec (literal "/usr/bin/true"))'
+            '(allow file-read* (subpath "/usr") (subpath "/System"))'
+            '(allow sysctl-read)')
+
+
+def _macos_worker_profile(interpreter: str, executable: str, input_file: Path, supervisor: Path) -> str:
+    """Deny-by-default Seatbelt profile for actual decoder execution.
+
+    This profile is intentionally restrictive:
+    - No process-fork granted globally; only the interpreter and decoder are allowlisted for exec.
+    - File reads limited to system paths, /dev/null, the interpreter binary, decoder binary,
+      the input file, and the supervisor script.
+    - No network, no mach-bootstrap by default.
+    - No write access except /dev/null.
+    - No access to user home, ~/.ssh, browser data, or arbitrary paths.
+
+    NOTE: sandbox-exec is deprecated by Apple. This profile has not been independently
+    validated on current Apple Silicon macOS. The self-test alone does not establish
+    robust isolation. Decoder execution remains gated by self-test success.
+    """
+    def quote(value: str) -> str: return '"' + value.replace('\\','\\\\').replace('"','\\"') + '"'
+    return ('(version 1)(deny default)'
+            '(allow process-exec'
+            ' (literal ' + quote(interpreter) + ')'
+            ' (literal ' + quote(executable) + '))'
+            '(allow sysctl-read)'
+            '(allow file-read*'
+            ' (subpath "/usr") (subpath "/System")'
+            ' (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom")'
+            ' (literal ' + quote(interpreter) + ')'
+            ' (literal ' + quote(executable) + ')'
+            ' (literal ' + quote(str(input_file)) + ')'
+            ' (literal ' + quote(str(supervisor)) + '))'
+            '(allow file-write* (literal "/dev/null"))')
+
+
 @lru_cache(maxsize=1)
 def isolation_status() -> dict:
     system = platform.system()
@@ -34,10 +73,10 @@ def isolation_status() -> dict:
         if system == 'Darwin':
             tool = '/usr/bin/sandbox-exec'
             if not Path(tool).is_file(): return {'available':False,'mechanism':'macOS sandbox-exec','reason':'sandbox-exec is unavailable on this macOS installation.'}
-            profile = '(version 1)(deny default)(allow process-exec (literal "/usr/bin/true"))(allow file-read* (subpath "/usr") (subpath "/System"))(allow sysctl-read)(allow mach-lookup)'
+            profile = _macos_self_test_profile()
             proc = subprocess.run([tool,'-p',profile,'/usr/bin/true'],capture_output=True,timeout=5)
             if proc.returncode != 0: return {'available':False,'mechanism':'macOS sandbox-exec','reason':'Sandbox self-test failed: '+proc.stderr.decode(errors='replace')[:250]}
-            return {'available':True,'mechanism':'macOS sandbox-exec','reason':'Sandbox self-test passed; network and non-allowlisted file access are denied.'}
+            return {'available':True,'mechanism':'macOS sandbox-exec (experimental, unverified on Apple Silicon)','reason':'Sandbox self-test passed with deny-by-default profile; network and non-allowlisted file access are denied. This is not independently validated — use a disposable VM for high-risk files.'}
         return {'available':False,'mechanism':'none','reason':'Only Linux bubblewrap and macOS sandbox-exec are supported.'}
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
         return {'available':False,'mechanism':'OS sandbox','reason':f'Sandbox self-test failed: {exc}'}
@@ -57,14 +96,9 @@ def isolated_command(input_file: Path, decoder_command: list[str], memory_mb: in
                               '--ro-bind',str(input_file),'/input/audio','--','/usr/bin/python3','-I','-S','/worker/supervisor.py',*worker_args]
         safe = ['<INPUT>' if x == str(input_file) else '<SUPERVISOR>' if x == str(supervisor) else x for x in cmd]
         return cmd,safe
-    def quote(value: str) -> str: return '"' + value.replace('\\','\\\\').replace('"','\\"') + '"'
     interpreter = str(Path(sys.executable).resolve())
     executable = decoder_command[0]
-    profile = ('(version 1)(deny default)(allow process-fork)'
-               '(allow process-exec (literal ' + quote(interpreter) + ') (literal ' + quote(executable) + '))'
-               '(allow sysctl-read)(allow mach-lookup)(allow file-read* (subpath "/usr") (subpath "/System") (subpath "/dev") '
-               '(subpath "/opt/homebrew") (subpath "/opt/local") (literal ' + quote(interpreter) + ') (literal ' + quote(str(input_file)) + ') (literal ' + quote(str(supervisor)) + '))'
-               '(allow file-write* (subpath "/dev"))')
+    profile = _macos_worker_profile(interpreter, executable, input_file, supervisor)
     actual = ['/usr/bin/sandbox-exec','-p',profile,interpreter,'-I','-S',str(supervisor),*worker_args]
     safe = [x.replace(str(input_file),'<INPUT>').replace(str(supervisor),'<SUPERVISOR>') for x in actual]
     return actual,safe

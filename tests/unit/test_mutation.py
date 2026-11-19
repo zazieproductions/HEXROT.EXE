@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
 from backend.parsers.audio import analyze
-from backend.mutation.engine import MutationError, generate
+from backend.mutation.engine import MutationError, generate, generate_batch, STRATEGIES, BOUNDARY_STRATEGIES
 
 FIX = Path(__file__).parents[1] / 'fixtures' / 'reference.wav'
 
@@ -57,3 +57,130 @@ def test_metadata_size_is_bounded_and_reproducible(tmp_path):
         lengths.add(field['byte_length'])
         assert history['metadata_size']==8192
     assert lengths=={0,8192}
+
+
+# --- v0.2.0 mutation engine tests ---
+
+def test_boundary_strategies_are_available():
+    """All boundary-value strategies should be in the strategy list."""
+    for strategy in ('boundary_min', 'boundary_max', 'boundary_off_by_one',
+                     'zero_length_field', 'max_syncsafe', 'negative_duration'):
+        assert strategy in STRATEGIES
+
+
+def test_boundary_min_produces_valid_mutation():
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    mutated, history = generate(data, analysis, 'boundary_min', 42, 0)
+    assert mutated != data
+    assert history['strategy'] == 'boundary_min'
+    assert history['edits']
+    assert history['original_sha256'] == history['reproduction_inputs']['original_sha256']
+
+
+def test_boundary_max_inflates_container():
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    mutated, history = generate(data, analysis, 'boundary_max', 42, 0)
+    assert mutated != data
+    # Container size at offset 4 should be larger than original
+    assert int.from_bytes(mutated[4:8], 'little') > int.from_bytes(data[4:8], 'little')
+
+
+def test_boundary_off_by_one():
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    mutated, history = generate(data, analysis, 'boundary_off_by_one', 42, 0)
+    assert mutated != data
+    assert history['edits'][0]['description'].endswith('(off-by-one)')
+
+
+def test_zero_length_field_strategy():
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    mutated, history = generate(data, analysis, 'zero_length_field', 42, 0)
+    assert mutated != data
+    # The fmt chunk size should be zero
+    fmt_offset = data.find(b'fmt ')
+    assert fmt_offset >= 0
+    assert int.from_bytes(mutated[fmt_offset+4:fmt_offset+8], 'little') == 0
+
+
+def test_negative_duration_strategy():
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    mutated, history = generate(data, analysis, 'negative_duration', 42, 0)
+    assert mutated != data
+    # Sample rate should be zero
+    fmt_offset = data.find(b'fmt ')
+    assert fmt_offset >= 0
+    assert int.from_bytes(mutated[fmt_offset+16:fmt_offset+20], 'little') == 0
+
+
+def test_boundary_strategies_fail_gracefully_on_mp3(tmp_path):
+    """Boundary strategies that need WAV structure should raise MutationError for MP3."""
+    import struct
+    frame = b'TIT2' + struct.pack('>I', 5) + b'\0\0' + b'\x03text'
+    tag = b'ID3\x03\0\0' + bytes([0,0,0,len(frame)]) + frame + b'\xff\xfb\x90\x64' + bytes(100)
+    # Write to a real temp file so analyze() can read it
+    mp3_path = tmp_path / 'test.mp3'
+    mp3_path.write_bytes(tag)
+    analysis = analyze(mp3_path, mp3_path.name)
+    assert analysis['format'] == 'MP3'
+    # boundary_min, boundary_max require WAV/AIFF/FLAC chunks
+    with pytest.raises(MutationError):
+        generate(tag, analysis, 'boundary_min', 1, 0)
+    with pytest.raises(MutationError):
+        generate(tag, analysis, 'boundary_max', 1, 0)
+    # zero_length_field works with MP3 (sets ID3 tag size to zero), but boundary_off_by_one needs WAV
+    with pytest.raises(MutationError):
+        generate(tag, analysis, 'boundary_off_by_one', 1, 0)
+    # negative_duration needs WAV/AIFF format
+    with pytest.raises(MutationError):
+        generate(tag, analysis, 'negative_duration', 1, 0)
+
+
+def test_generate_batch_deduplication():
+    """Batch generation with deduplication should skip duplicate hashes."""
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    # Use a single strategy that's deterministic: same seed + index always produces same output
+    results = generate_batch(data, analysis, 5, 42, ['signature'], deduplicate=True)
+    # signature always replaces first 4 bytes with 'XROT' — all 5 would be identical
+    assert len(results) == 1  # Only the first one survives dedup
+
+
+def test_generate_batch_without_deduplication():
+    """Without deduplication, all requested mutations are produced."""
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    results = generate_batch(data, analysis, 3, 42, ['signature'], deduplicate=False)
+    assert len(results) == 3
+
+
+def test_generate_batch_mixed_strategies():
+    """Mixed strategies should cycle correctly."""
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    results = generate_batch(data, analysis, 6, 42, ['header_boundary', 'truncation'], deduplicate=False)
+    assert len(results) == 6
+    strategies_used = [h['strategy'] for _, h in results]
+    assert strategies_used == ['header_boundary', 'truncation', 'header_boundary', 'truncation', 'header_boundary', 'truncation']
+
+
+def test_mutation_history_contains_reproduction_inputs():
+    """Every mutation history must contain enough information to reproduce."""
+    data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
+    mutated, history = generate(data, analysis, 'header_boundary', 7, 3)
+    assert 'reproduction_inputs' in history
+    ri = history['reproduction_inputs']
+    assert ri['seed'] == 7
+    assert ri['strategy'] == 'header_boundary'
+    assert ri['index'] == 3
+    assert ri['original_sha256'] == history['original_sha256']
+    # Verify reproducibility using the recorded inputs
+    replay, replay_history = generate(data, analysis, ri['strategy'], ri['seed'], ri['index'],
+                                       ri['size_limit'], ri['region'], ri['metadata_size'])
+    assert replay == mutated
+
+
+def test_original_file_preserved():
+    """Mutation must never modify the original bytes."""
+    original = FIX.read_bytes()
+    original_hash = original.hex()
+    analysis = analyze(FIX, FIX.name)
+    for i, strategy in enumerate(['header_boundary', 'chunk_length', 'truncation', 'signature', 'trailing']):
+        generate(original, analysis, strategy, 99, i)
+    assert FIX.read_bytes().hex() == original_hash
