@@ -184,7 +184,7 @@ def generate(original: bytes, analysis: dict, strategy: str, seed: int, index: i
             comm_chunk = next((c for c in chunks if c['name'] == 'COMM'), None)
             if comm_chunk and comm_chunk['actual_size'] >= 18:
                 # Set numSampleFrames to 0
-                ed.replace(comm_chunk['offset']+8+4, 4, b'\x00\x00\x00\x00', 'Set AIFF numSampleFrames to zero')
+                ed.replace(comm_chunk['offset']+8+2, 4, b'\x00\x00\x00\x00', 'Set AIFF numSampleFrames to zero')
             else:
                 raise MutationError('COMM chunk too small for negative_duration')
         else:

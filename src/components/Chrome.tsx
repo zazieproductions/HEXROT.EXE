@@ -18,7 +18,7 @@ export function TopBar({workspace,page}:{workspace:Workspace;page:Page}) {
   return <header className="topbar">
     <div className="brand"><BrandMark/><div><strong>HEXROT<span>.EXE</span></strong><small>AUDIO RESEARCH WORKSTATION</small></div></div>
     <div className="top-crumb"><span>WORKSPACE</span><span className="crumb-slash">/</span><b>{label.toUpperCase()}</b></div>
-    <div className="top-actions"><div className="top-engine"><span className={`status-dot ${workspace.health?'green':'amber'}`}/><span>{workspace.connecting?'CONNECTING':workspace.health?'ENGINE ONLINE':workspace.mode==='backend'?'ENGINE OFFLINE':'BROWSER MODE'}</span></div><span className="top-separator"/><div className="top-local"><LockKeyhole size={13}/><span>LOCAL WORKSPACE</span></div><span className="top-separator"/><span className="header-version">v0.1.1</span></div>
+    <div className="top-actions"><div className="top-engine"><span className={`status-dot ${workspace.health?'green':'amber'}`}/><span>{workspace.connecting?'CONNECTING':workspace.health?'ENGINE ONLINE':workspace.mode==='backend'?'ENGINE OFFLINE':'BROWSER MODE'}</span></div><span className="top-separator"/><div className="top-local"><LockKeyhole size={13}/><span>LOCAL WORKSPACE</span></div><span className="top-separator"/><span className="header-version">v0.2.0</span></div>
   </header>;
 }
 
