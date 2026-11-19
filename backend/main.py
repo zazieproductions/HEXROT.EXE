@@ -4,6 +4,7 @@ import base64
 import os
 import re
 import shlex
+import tempfile
 from pathlib import Path
 from typing import Literal
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
@@ -73,6 +74,80 @@ class JobRequest(BaseModel):
     timeout_seconds: float = Field(default=5,ge=0.25,le=30)
     memory_mb: int = Field(default=512,ge=128,le=2048)
     repeats: int = Field(default=1,ge=1,le=5)
+
+
+def _basic_delta_debug(mutated_file: dict, original_file: dict, decoder: str,
+                       limits: dict, expected_signal: int | None) -> dict | None:
+    """Bounded single-edit-drop triage for a reproducible signal termination.
+
+    Replays the original mutation edits from their stored previews, dropping one
+    edit per candidate. This is intentionally narrow: it is not full ddmin, it
+    tests only single-edit contributions, and it refuses lossy replay when an
+    edit preview was truncated at 128 bytes. A candidate "still crashes" only
+    when it is abnormal with the same signal observed in the triaged run.
+    """
+    mutation = mutated_file.get('mutation') or {}
+    edits = mutation.get('edits') or []
+    if not edits or expected_signal is None:
+        return None
+    if len(edits) > 20:
+        return {'method': 'single_edit_drop', 'skipped': True, 'edit_count': len(edits),
+                'note': 'Too many edits for bounded analysis (limit 20).'}
+    if any(edit.get('preview_truncated') for edit in edits):
+        return {'method': 'single_edit_drop', 'skipped': True, 'edit_count': len(edits),
+                'note': 'Replay refused: an edit preview was truncated at 128 bytes, so rebuilding would be lossy.'}
+    original_data = Path(original_file['path']).read_bytes()
+    timeout = limits['timeout_seconds']
+    memory_mb = limits['memory_mb']
+    results = []
+    for drop_idx in range(len(edits)):
+        candidate = bytearray(original_data)
+        valid = True
+        for idx, edit in enumerate(edits):
+            if idx == drop_idx:
+                continue
+            try:
+                offset = int(edit['offset'])
+                old_len = int(edit['old_length'])
+                new_bytes = bytes.fromhex(str(edit['after_hex']))
+            except (KeyError, TypeError, ValueError):
+                valid = False
+                break
+            if offset < 0 or old_len < 0 or offset + old_len > len(candidate):
+                valid = False
+                break
+            candidate[offset:offset + old_len] = new_bytes
+        if not valid:
+            results.append({'dropped_edit_index': drop_idx,
+                            'dropped_edit_description': edits[drop_idx].get('description', ''),
+                            'still_crashes': None, 'exit_code': None, 'signal': None,
+                            'note': 'Replay offset was out of bounds for this candidate.'})
+            continue
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.bin') as tmp:
+            tmp.write(bytes(candidate))
+            tmp_path = Path(tmp.name)
+        try:
+            result = execute(tmp_path, decoder, timeout, memory_mb)
+            results.append({
+                'dropped_edit_index': drop_idx,
+                'dropped_edit_description': edits[drop_idx].get('description', ''),
+                'still_crashes': bool(result.get('abnormal') and result.get('signal') == expected_signal),
+                'exit_code': result.get('exit_code'),
+                'signal': result.get('signal'),
+            })
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    critical = [r for r in results if r['still_crashes'] is False]
+    return {
+        'method': 'single_edit_drop',
+        'edit_count': len(edits),
+        'edits_tested': len([r for r in results if r['still_crashes'] is not None]),
+        'expected_signal': expected_signal,
+        'critical_edits': critical,
+        'results': results,
+        'note': ('Dropped one edit at a time. An edit is a contributing candidate when removing it '
+                 'stops the same signal; this is not proof of exploitability.'),
+    }
 
 
 def create_app(db_root: Path | None = None) -> FastAPI:
@@ -240,7 +315,7 @@ def create_app(db_root: Path | None = None) -> FastAPI:
         # Basic delta debugging: if the file is a mutation, try to identify which edit matters
         minimization = None
         if reproducible and file.get('mutation') and file['mutation'].get('edits'):
-            minimization = _basic_delta_debug(file, original, run['decoder'], limits)
+            minimization = _basic_delta_debug(file, original, run['decoder'], limits, run['result'].get('signal'))
         return db.add_triage(sid,run_id,{
             'reproducible':reproducible,
             'original_run':run['result'],
@@ -257,65 +332,6 @@ def create_app(db_root: Path | None = None) -> FastAPI:
             'resource_exceeded': run['result'].get('resource_exceeded'),
             'is_resource_limit': bool(run['result'].get('resource_exceeded')),
         })
-
-    def _basic_delta_debug(mutated_file: dict, original_file: dict, decoder: str, limits: dict) -> dict:
-        """Bounded delta debugging: test individual edit groups to narrow the failure-inducing change.
-
-        This is a simplified approach: we undo one edit at a time and check if the crash still occurs.
-        It does not explore all 2^n subsets but identifies the most impactful edits.
-        """
-        import hashlib as _hashlib
-        mutation = mutated_file['mutation']
-        if not mutation or not mutation.get('edits'):
-            return None
-        edits = mutation['edits']
-        if len(edits) > 20:
-            return {'method': 'basic_delta_debug', 'note': 'Too many edits for bounded analysis', 'edit_count': len(edits)}
-        original_data = Path(original_file['path']).read_bytes()
-        timeout = limits['timeout_seconds']
-        memory_mb = limits['memory_mb']
-        # Replay original edits, dropping one at a time
-        results = []
-        for drop_idx in range(len(edits)):
-            # Rebuild with all edits except drop_idx
-            candidate = bytearray(original_data)
-            kept_edits = []
-            for idx, edit in enumerate(edits):
-                if idx == drop_idx:
-                    continue
-                offset = edit['offset']
-                old_len = edit['old_length']
-                new_hex = edit['after_hex']
-                new_bytes = bytes.fromhex(new_hex)
-                if offset + old_len <= len(candidate):
-                    candidate[offset:offset+old_len] = new_bytes
-                    kept_edits.append(edit)
-            candidate_bytes = bytes(candidate)
-            # Write to temp and test
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.bin') as tmp:
-                tmp.write(candidate_bytes)
-                tmp_path = Path(tmp.name)
-            try:
-                result = execute(tmp_path, decoder, timeout, memory_mb)
-                still_crashes = result['abnormal'] and result['signal'] == mutation.get('signal')
-                results.append({
-                    'dropped_edit_index': drop_idx,
-                    'dropped_edit_description': edits[drop_idx].get('description', ''),
-                    'still_crashes': still_crashes,
-                    'exit_code': result.get('exit_code'),
-                    'signal': result.get('signal'),
-                })
-            finally:
-                tmp_path.unlink(missing_ok=True)
-        critical_edits = [r for r in results if not r['still_crashes']]
-        return {
-            'method': 'basic_delta_debug',
-            'edit_count': len(edits),
-            'edits_tested': len(results),
-            'critical_edits': critical_edits,
-            'note': 'Dropped one edit at a time; edits where removing them prevents the crash are likely contributing factors.',
-        }
 
     @app.get('/api/sessions/{sid}/report')
     def report(sid: str, format: Literal['json','md','html']='json'):

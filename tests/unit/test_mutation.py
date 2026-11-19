@@ -106,10 +106,18 @@ def test_negative_duration_strategy():
     data = FIX.read_bytes(); analysis = analyze(FIX, FIX.name)
     mutated, history = generate(data, analysis, 'negative_duration', 42, 0)
     assert mutated != data
-    # Sample rate should be zero
+    # WAV: sample rate should be zero
     fmt_offset = data.find(b'fmt ')
     assert fmt_offset >= 0
     assert int.from_bytes(mutated[fmt_offset+16:fmt_offset+20], 'little') == 0
+    # AIFF: numSampleFrames begins two bytes into the COMM body, after channels.
+    aiff = Path(__file__).parents[1] / 'fixtures' / 'reference.aiff'
+    aiff_data = aiff.read_bytes(); aiff_analysis = analyze(aiff, aiff.name)
+    aiff_mutated, _ = generate(aiff_data, aiff_analysis, 'negative_duration', 42, 0)
+    comm = next(c for c in aiff_analysis['chunks'] if c['name'] == 'COMM')
+    frames = aiff_mutated[comm['offset']+10:comm['offset']+14]
+    assert frames == b'\x00\x00\x00\x00'
+    assert aiff_mutated != aiff_data
 
 
 def test_boundary_strategies_fail_gracefully_on_mp3(tmp_path):
