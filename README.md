@@ -1,5 +1,7 @@
 # HEXROT.EXE
 
+[Open the browser preview on GitHub Pages](https://zazieproductions.github.io/HEXROT.EXE/)
+
 <p align="center"><strong>Corrupt the Format. Expose the Fault.</strong><br/>
 A local-first audio-format research workstation for real bytes, deterministic variants, sandboxed decoders, and reproducible evidence.</p>
 

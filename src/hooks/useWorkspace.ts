@@ -24,7 +24,7 @@ export function useWorkspace() {
     setDetail(emptyDetail(item)); setSelectedId(item.id); setLocalBytes(bytes); setMode('browser'); setComparisons([]);
   },[]);
   const localDemo = useCallback(async () => {
-    const response=await fetch('/fixtures/reference.wav');
+    const response=await fetch(import.meta.env.BASE_URL + 'fixtures/reference.wav');
     if (!response.ok) throw new Error('The generated demo fixture could not be loaded.');
     await localFile(new File([await response.blob()],'reference.wav',{type:'audio/wav'}));
   },[localFile]);
