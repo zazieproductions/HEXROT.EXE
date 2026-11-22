@@ -9,7 +9,7 @@ import random
 import struct
 import time
 from typing import Any
-from backend.config import MAX_FILE_SIZE, MAX_METADATA_VALUE
+from backend.config import MAX_METADATA_VALUE
 
 STRATEGIES = ['header_boundary','chunk_length','truncation','duplicate_metadata','metadata_value',
               'invalid_encoding','signature','trailing','chunk_order','seeded_bytes',
@@ -26,14 +26,14 @@ class MutationError(ValueError): pass
 
 
 class Editor:
-    def __init__(self, data: bytes, limit: int):
+    def __init__(self, data: bytes, limit: int | None):
         self.data = bytearray(data)
         self.edits: list[dict[str, Any]] = []
-        self.limit = min(limit, MAX_FILE_SIZE)
+        self.limit = limit
 
     def replace(self, offset: int, length: int, new: bytes, description: str) -> None:
         if offset < 0 or length < 0 or offset + length > len(self.data): raise MutationError('Edit out of bounds')
-        if len(self.data) - length + len(new) > self.limit: raise MutationError('Mutation exceeds configured file-size limit')
+        if self.limit is not None and len(self.data) - length + len(new) > self.limit: raise MutationError('Mutation exceeds configured file-size limit')
         old = bytes(self.data[offset:offset+length])
         self.data[offset:offset+length] = new
         self.edits.append({'offset':offset, 'old_length':len(old), 'new_length':len(new),
@@ -42,10 +42,11 @@ class Editor:
             'preview_truncated':len(old)>128 or len(new)>128, 'description':description})
 
 
-def generate(original: bytes, analysis: dict, strategy: str, seed: int, index: int, limit: int = MAX_FILE_SIZE, region: str = 'any', metadata_size: int = 8192) -> tuple[bytes, dict]:
+def generate(original: bytes, analysis: dict, strategy: str, seed: int, index: int, limit: int | None = None, region: str = 'any', metadata_size: int = 8192) -> tuple[bytes, dict]:
     if strategy not in STRATEGIES: raise MutationError(f'Unknown strategy: {strategy}')
     if not original: raise MutationError('Cannot mutate an empty file')
-    if len(original) > limit or not 0 <= metadata_size <= MAX_METADATA_VALUE: raise MutationError('Invalid mutation size limit')
+    if (limit is not None and (limit < 1 or len(original) > limit)) or not 0 <= metadata_size <= MAX_METADATA_VALUE:
+        raise MutationError('Invalid mutation size limit')
     rng = random.Random(f'{seed}:{index}:{strategy}')
     ed = Editor(original, limit)
     fmt = analysis['format']
@@ -211,7 +212,7 @@ def generate(original: bytes, analysis: dict, strategy: str, seed: int, index: i
 
 
 def generate_batch(original: bytes, analysis: dict, count: int, seed: int,
-                   strategies: list[str], limit: int = MAX_FILE_SIZE,
+                   strategies: list[str], limit: int | None = None,
                    region: str = 'any', metadata_size: int = 8192,
                    deduplicate: bool = True) -> list[tuple[bytes, dict]]:
     """Generate up to `count` mutations, cycling through strategies.

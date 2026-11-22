@@ -11,7 +11,7 @@ A local-first audio-format research workstation for real bytes, deterministic va
 
 <div align="center">
   <a href="#quickstart"><img alt="version 0.2.0" src="https://img.shields.io/badge/version-0.2.0-FF6B6B?style=flat-square&amp;labelColor=101713"/></a>
-  <a href="#verification"><img alt="50 passed, 6 skipped" src="https://img.shields.io/badge/tests-50%20passed%20%2F%206%20skipped-6EE7A8?style=flat-square&amp;labelColor=101713"/></a>
+  <a href="#verification"><img alt="52 passed, 6 skipped" src="https://img.shields.io/badge/tests-52%20passed%20%2F%206%20skipped-6EE7A8?style=flat-square&amp;labelColor=101713"/></a>
   <a href="#quickstart"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-5AC8F5?style=flat-square&amp;labelColor=101713"/></a>
   <a href="#quickstart"><img alt="Node 20.19+ or 22.12+" src="https://img.shields.io/badge/node-20.19%2B%20%7C%2022.12%2B-5AC8F5?style=flat-square&amp;labelColor=101713"/></a>
   <a href="#decoders--isolation"><img alt="Linux + macOS" src="https://img.shields.io/badge/platform-Linux%20%2B%20macOS-B99CFF?style=flat-square&amp;labelColor=101713"/></a>
@@ -30,15 +30,15 @@ A local-first audio-format research workstation for real bytes, deterministic va
 
 ## At a glance
 
-| `0.2.0` | `56` | `50 / 6` | `16` | `3` | `15` | `7` |
+| `0.2.0` | `58` | `52 / 6` | `16` | `3` | `16` | `7` |
 |:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | release | tests collected | passed / env-skipped | mutation strategies | decoder adapters | API endpoints | CI jobs configured |
 
 | Plane | State in this checkout | What that means |
 |---|---|---|
-| <span style="color:#2fe58f">●</span> Backend core | **Verified** | `50 passed, 6 skipped` in about `1.4 s`; parsers, mutation, API, storage, reports exercised with real bytes |
-| <span style="color:#2fe58f">●</span> Frontend | **Verified** | `tsc --noEmit` clean; Vite production build `844.28 kB` (`476.85 kB` gzip) |
-| <span style="color:#5fe6ff">●</span> Browser-only preview | **Implemented; not E2E-tested here** | Bounded RIFF/AIFF inspection in memory; no persistence, no mutation files, no decoder jobs |
+| <span style="color:#2fe58f">●</span> Backend core | **Verified** | `52 passed, 6 skipped`; parsers, large streamed uploads, range playback, mutation, API, storage, and reports exercised |
+| <span style="color:#2fe58f">●</span> Frontend | **Verified** | `tsc --noEmit` clean; Vite production build `858.87 kB` (`480.45 kB` gzip) |
+| <span style="color:#5fe6ff">●</span> Browser-only preview | **Implemented; not E2E-tested here** | In-browser parsing and real-time audio playback; no persistence, no mutation files, no decoder jobs |
 | <span style="color:#ffb454">●</span> Decoder execution | **Gated, not exercised here** | Requires a passing sandbox self-test plus an allowlisted decoder; both absent in this container |
 | <span style="color:#ffb454">●</span> Linux integration | **Code-complete, not run here** | Four sandbox tests skipped because `bubblewrap` is unavailable |
 | <span style="color:#ff5468">●</span> macOS / ARM64 | **Unverified** | Deny-by-default Seatbelt profile exists; no Mac was used in this revision |
@@ -377,7 +377,7 @@ erDiagram
 | # | Stage | Action | Endpoint / UI | Artifact |
 |:--:|---|---|---|---|
 | 01 | **Import** | Load the generated fixture or an authorized file | `POST /api/sessions/upload` or **Import File** | Session + original file |
-| 02 | **Autopsy** | Inspect hash, magic, chunk map, declared vs actual sizes | **Autopsy** | Analysis JSON |
+| 02 | **Autopsy** | Inspect hash, chunk map, real-time playback, and the byte-synced playhead | **Autopsy** | Analysis JSON + playback position |
 | 03 | **Metadata** | Extract tags with offsets; review labeled heuristics | **Metadata** | Metadata fields + artwork hashes |
 | 04 | **Mutate** | Generate seeded variants from the immutable original | `POST /api/sessions/{id}/mutations` | Variant files + edit ledger |
 | 05 | **Decode** | Run allowlisted tools inside the gated sandbox | `POST /api/sessions/{id}/jobs` | Runs with exit/signal, logs, limits |
@@ -564,7 +564,7 @@ Every history record contains:
 | Strategy cycling | `strategies[index % len(strategies)]` |
 | Dedup | Default `true`; skips outputs identical to the original or any earlier output |
 | Return count | Always attempts `count` generations; may return fewer after dedup or unsupported combinations |
-| Size limit | Variant may not exceed `max_file_size` (≤ 32 MiB) |
+| Size limit | `max_file_size` is optional; `null` leaves generated variants uncapped |
 | Metadata limit | `metadata_size` is `0…65,536` bytes |
 | Region filter | Only `seeded_bytes` uses a named chunk/region |
 | Failure mode | Unsupported format/strategy returns `MutationError`; API returns `422` |
@@ -579,7 +579,7 @@ Every history record contains:
   "count_generated": 5,
   "deduplicated": true,
   "strategies": ["header_boundary", "chunk_length", "truncation", "signature", "trailing"],
-  "max_file_size": 33554432,
+  "max_file_size": null,
   "metadata_size": 8192,
   "region": "any",
   "original_sha256": "…",
@@ -835,18 +835,19 @@ Base URL: `http://127.0.0.1:8000/api`. All responses are JSON unless a file/repo
 | 1 | `GET` | `/health` | Status, version, isolation, decoders, limits | — | — |
 | 2 | `GET` | `/sessions` | List up to 100 sessions | — | — |
 | 3 | `POST` | `/sessions/demo` | Create a session from `tests/fixtures/reference.wav` | — | `503` fixture missing |
-| 4 | `POST` | `/sessions/upload` | Upload a real file (multipart `file`) | ≤ 32 MiB | `400` empty, `413` oversize |
+| 4 | `POST` | `/sessions/upload` | Stream a real file (multipart `file`) | No application-level size cap | `400` empty |
 | 5 | `GET` | `/sessions/{sid}` | Session + files + jobs + runs + triage | — | `404` |
 | 6 | `GET` | `/sessions/{sid}/files/{fid}/bytes` | Base64 bytes at offset | `offset ≥ 0`, `length 1–4096` | `404`, `422` |
 | 7 | `GET` | `/sessions/{sid}/files/{fid}/compare` | Offset-aligned original vs variant | `offset`, `length` | `404` |
-| 8 | `GET` | `/sessions/{sid}/files/{fid}/download` | Raw file download | — | `404` |
-| 9 | `POST` | `/sessions/{sid}/mutations` | Generate seeded variants | `count`, `seed`, `strategies`, limits | `422` unknown strategy/size |
-| 10 | `POST` | `/sessions/{sid}/jobs` | Start one decoder job | `file_ids`, `decoders`, `timeout_seconds`, `memory_mb`, `repeats` | `409`, `422`, `503` |
-| 11 | `GET` | `/jobs/{job_id}` | Job status + active worker PID | — | `404` |
-| 12 | `POST` | `/jobs/{job_id}/cancel` | Cancel the active job | — | `404`, `409` |
-| 13 | `GET` | `/sessions/{sid}/differential` | Comparison matrix | — | `404` |
-| 14 | `POST` | `/sessions/{sid}/runs/{run_id}/triage` | Reproduce and minimize | — | `404`, `409`, `422` |
-| 15 | `GET` | `/sessions/{sid}/report` | Evidence export | `format=json\|md\|html` | `404`, `422` |
+| 8 | `GET` | `/sessions/{sid}/files/{fid}/download` | Download a file | — | `404` |
+| 9 | `GET` | `/sessions/{sid}/files/{fid}/media` | Stream audio with byte-range seeking | Optional `Range: bytes=…` | `404`, `416` |
+| 10 | `POST` | `/sessions/{sid}/mutations` | Generate seeded variants | `count`, `seed`, `strategies`, optional output ceiling | `422` unknown strategy/size |
+| 11 | `POST` | `/sessions/{sid}/jobs` | Start one decoder job | `file_ids`, `decoders`, `timeout_seconds`, `memory_mb`, `repeats` | `409`, `422`, `503` |
+| 12 | `GET` | `/jobs/{job_id}` | Job status + active worker PID | — | `404` |
+| 13 | `POST` | `/jobs/{job_id}/cancel` | Cancel the active job | — | `404`, `409` |
+| 14 | `GET` | `/sessions/{sid}/differential` | Comparison matrix | — | `404` |
+| 15 | `POST` | `/sessions/{sid}/runs/{run_id}/triage` | Reproduce and minimize | — | `404`, `409`, `422` |
+| 16 | `GET` | `/sessions/{sid}/report` | Evidence export | `format=json\|md\|html` | `404`, `422` |
 
 ### Request models
 
@@ -858,7 +859,7 @@ Base URL: `http://127.0.0.1:8000/api`. All responses are JSON unless a file/repo
 | `count` | `5` | `1–50` |
 | `seed` | `42` | `0–2³²−1` |
 | `strategies` | 5-strategy default cycle | `1–16` names, all in `STRATEGIES` |
-| `max_file_size` | `33,554,432` | `1–33,554,432` |
+| `max_file_size` | `null` | `null` for no ceiling, or an integer ≥ 1 byte |
 | `metadata_size` | `8192` | `0–65,536` |
 | `region` | `any` | string ≤ 100 chars; used by `seeded_bytes` |
 | `deduplicate` | `true` | boolean |
@@ -917,7 +918,7 @@ curl -s "http://127.0.0.1:8000/api/sessions/<SID>/report?format=md" -o evidence.
 | Browser `Origin` | `http(s)://localhost\|127.0.0.1\|[::1]` with optional port | Anything else → `403` |
 | CORS methods | `GET`, `POST` | Other methods |
 | CORS credentials | Disabled | — |
-| Request body | ≤ 1 MiB non-upload; ≤ 33 MiB upload | `413` |
+| Request body | ≤ 1 MiB for non-upload POSTs; uploads are streamed without an application-level size cap | `413` applies to oversized non-upload POSTs |
 
 The service has **no authentication**. It assumes a trusted local user and does not defend against a hostile process already running as that user.
 
@@ -959,7 +960,7 @@ A malicious media file can therefore attempt to exploit the parser or a dependen
 
 | Category | Ceiling | Enforcement |
 |---|---|---|
-| Upload | `32 MiB` | Streamed read + middleware |
+| Upload | No application-level cap | Multipart spool + bounded-memory disk copy; disk capacity and parser/runtime resources still apply |
 | Variants | `50` per request | Pydantic bound + generator loop |
 | Metadata value | `64 KiB` | Mutation validation |
 | Parsed chunks | `4,096` | Parser loop guard |
@@ -998,10 +999,10 @@ Report suspected issues privately via the repository's security advisory mechani
 ## 11 · Verification & CI
 
 <div align="center">
-  <img src="docs/diagrams/verification.svg" alt="Verification matrix: 56 collected, 50 passed, 6 skipped, and seven CI jobs" width="100%"/>
+  <img src="docs/diagrams/verification.svg" alt="Verification matrix: 58 collected, 52 passed, 6 skipped, and seven CI jobs" width="100%"/>
 </div>
 
-### Local run — 2026-11-19
+### Local run — 2026-11-22
 
 | Property | Value |
 |---|---|
@@ -1013,7 +1014,7 @@ Report suspected issues privately via the repository's security advisory mechani
 
 ```console
 $ python -m pytest -q
-50 passed, 6 skipped, 1 warning in 1.43s
+52 passed, 6 skipped, 1 warning
 ```
 
 ```console
@@ -1023,9 +1024,9 @@ $ npm run typecheck
 
 $ npm run build
 vite v7.3.7 building client environment for production...
-✓ 2146 modules transformed.
-dist/index.html  1,053.79 kB │ gzip: 652.33 kB
-✓ built in 4.36s
+✓ 2149 modules transformed.
+dist/index.html  858.87 kB │ gzip: 480.45 kB
+✓ built in 7.00s
 ```
 
 ### Test tiers
@@ -1037,8 +1038,8 @@ dist/index.html  1,053.79 kB │ gzip: 652.33 kB
 | `tests/unit` — supervisor | 3 | 3 | 0 | Real child execution, exit status, inherited rlimits |
 | `tests/unit` — triage | 4 | 4 | 0 | Observed-signal comparison, critical-edit direction, lossy-preview guard, edit cap |
 | `tests/integration` — sandbox | 4 | 0 | 4 | Decoder output hash, signal vs exit, host home/loopback denial, sndfile zero-exit |
-| `tests/end_to_end` — API | 13 | 12 | 1 | Full workflow, path safety, origin policy, limits, manifests, dedup, reports, cancel |
-| **Total** | **56** | **50** | **6** | |
+| `tests/end_to_end` — API | 15 | 14 | 1 | Full workflow, >32 MiB streaming upload, range playback, path safety, origin policy, manifests, dedup, reports, cancel |
+| **Total** | **58** | **52** | **6** | |
 
 ### The six skips
 
@@ -1107,7 +1108,7 @@ curl -s http://127.0.0.1:8000/api/sessions | python -m json.tool
 | `422 A selected decoder is unavailable or not allowlisted` | Tool not installed or not in fixed paths | Install into `/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, or `/opt/local/bin` |
 | `409 Another decoder job is already running` | Single-job lock | Wait or cancel the active job |
 | `409 Job is not running` on cancel | Job already finished | Refresh job status |
-| `413 Request exceeds the configured size limit` | Upload > 32 MiB or JSON body > 1 MiB | Reduce input or request |
+| `413 Request exceeds the configured size limit` | Non-upload POST body exceeds 1 MiB | Reduce the JSON request body |
 | `400 Empty files are not accepted` | Zero-byte upload | Provide a real file |
 | `422 Unknown strategies: [...]` | Strategy name typo or version mismatch | Use the names in `STRATEGIES` / the UI list |
 | `503 Fixture missing` on demo | Fixtures not generated | `python scripts/generate_fixtures.py` |
@@ -1136,7 +1137,7 @@ Never point `HEXROT_HOME` at a directory containing unrelated files.
 | Generate 5 variants | Milliseconds |
 | Poll a decoder job | Every `700 ms` from the UI |
 | Health polling | Every `15 s` while connected |
-| API request timeout | `8 s` (upload `60 s`, triage `120 s`) |
+| API request timeout | `8 s` default (uploads have no client timeout; triage `120 s`) |
 | Typical decoder run | Hundreds of milliseconds; bounded by timeout |
 
 ### Adding a decoder or strategy
@@ -1153,7 +1154,7 @@ Never point `HEXROT_HOME` at a directory containing unrelated files.
 HEXROT.EXE/
 ├── backend/
 │   ├── main.py                 # FastAPI app, 15 routes, guards, triage orchestration
-│   ├── config.py               # MAX_FILE_SIZE, MAX_MUTATIONS, MAX_METADATA_VALUE, MAX_LOG, HEXROT_HOME
+│   ├── config.py               # MAX_MUTATIONS, MAX_METADATA_VALUE, MAX_LOG, HEXROT_HOME
 │   ├── parsers/audio.py        # Bounded RIFF/WAVE, AIFF/AIFC, FLAC, MP3/ID3 parsers
 │   ├── metadata/inspection.py  # Raw text extraction, Mutagen supplementation, labeled heuristics
 │   ├── mutation/engine.py      # Editor, 16 strategies, batch dedup, replay manifest
@@ -1252,13 +1253,21 @@ HEXROT.EXE/
 <a id="changelog"></a>
 ## 15 · Changelog
 
+### Unlimited local uploads and synchronized playback — 2026-11-22 (working tree)
+
+- Removed the 32 MiB upload ceiling; multipart uploads spool to disk, the backend copies them in bounded-memory chunks, and analysis uses read-only mappings.
+- Added a real-time audio player and signal envelope with seeking, playback-clock-to-byte mapping, live hex playhead highlighting, and byte-range media streaming.
+- Made mutation output ceilings optional instead of inheriting the former 32 MiB cap; retained an optional user-configurable limit.
+- Updated the API, security guidance, and diagrams; added regression coverage for uploads above 32 MiB, range playback, and local-origin CORS.
+- Verified: **58 collected / 52 passed / 6 skipped**; frontend typecheck and production build pass.
+
 ### Documentation revision — 2026-11-19 (working tree)
 
 - Rebuilt this README with color-coded sections, a diagram suite, charts, an API reference, guardrail tables, and an explicit evidence-claim ladder.
 - Added `docs/diagrams/generate_diagrams.py` and six deterministic SVGs (hero, architecture, workflow, trust boundary, verification, guardrails).
 - **Fixed triage correctness:** single-edit-drop analysis now compares candidates against the **observed run signal** instead of a missing mutation field that made every edit appear critical.
 - Added a lossy-replay guard: triage refuses to rebuild candidates when any edit preview was truncated at 128 bytes.
-- Added four regression tests (`tests/unit/test_triage.py`); current total is **56 collected / 50 passed / 6 skipped**.
+- Added four regression tests (`tests/unit/test_triage.py`); at that revision the suite was **56 collected / 50 passed / 6 skipped**.
 - Corrected the AIFF `negative_duration` edit to zero `numSampleFrames` at the true COMM body offset (`+2`, after channels), with fixture coverage.
 - Corrected the frontend header version label from `v0.1.1` to `v0.2.0`.
 

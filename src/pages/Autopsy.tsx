@@ -1,8 +1,10 @@
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, ChevronRight, Copy, FileAudio, FileSearch, Fingerprint, FolderOpen, Info, Upload, AlertTriangle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatBytes, hexOffset } from '../services/api';
 import type { Chunk, Page } from '../types';
 import type { Workspace } from '../hooks/useWorkspace';
+import { AudioPlayback } from '../components/AudioPlayback';
+import type { AudioSeekRequest, PlaybackPosition } from '../components/AudioPlayback';
 import { HexViewer } from '../components/HexViewer';
 import { PageHeader, PanelTitle } from '../components/Chrome';
 
@@ -13,11 +15,22 @@ export function Autopsy({workspace,onImport,onPage}:{workspace:Workspace;onImpor
   const file=workspace.selected;
   const [selectedChunk,setSelectedChunk]=useState<Chunk|null>(null);
   const [offset,setOffset]=useState(0);
+  const [playheadOffset,setPlayheadOffset]=useState<number|null>(null);
+  const [seekRequest,setSeekRequest]=useState<AudioSeekRequest|null>(null);
+  const seekSequence=useRef(0);
   const [copied,setCopied]=useState(false);
-  useEffect(()=>{setSelectedChunk(file?.analysis.chunks[0] || null);setOffset(0);},[file?.id]);
+  useEffect(()=>{setSelectedChunk(file?.analysis.chunks[0] || null);setOffset(0);setPlayheadOffset(null);setSeekRequest(null);},[file?.id]);
+  const requestAudioSeek=useCallback((byteOffset:number)=>{seekSequence.current+=1;setSeekRequest({token:seekSequence.current,offset:byteOffset});},[]);
+  const syncPlayback=useCallback((position:PlaybackPosition)=>{
+    setPlayheadOffset(position.byteOffset);
+    const page=Math.floor(Math.max(0,position.byteOffset)/16)*16;
+    setOffset(current=>current===page?current:page);
+    if(position.chunkId) setSelectedChunk(current=>current?.id===position.chunkId?current:file?.analysis.chunks.find(chunk=>chunk.id===position.chunkId) || current);
+  },[file?.analysis.chunks]);
+  const manualOffset=useCallback((next:number)=>{setOffset(next);requestAudioSeek(next);},[requestAudioSeek]);
   if (!file) return <main className="content"><PageHeader index="01" title="FILE AUTOPSY" description="Inspect the anatomy of an audio file."/><div className="loading-state">{workspace.connecting?'Loading the local fixture...':'Import an audio file to begin.'}</div></main>;
   const a=file.analysis;
-  const chooseChunk=(chunk:Chunk)=>{setSelectedChunk(chunk);setOffset(Math.floor(chunk.offset/16)*16);};
+  const chooseChunk=(chunk:Chunk)=>{setSelectedChunk(chunk);const next=Math.floor(chunk.offset/16)*16;setOffset(next);requestAudioSeek(chunk.offset);};
   const copy=async()=>{try {await navigator.clipboard.writeText(a.sha256);setCopied(true);window.setTimeout(()=>setCopied(false),1600);} catch {workspace.setError('Could not copy the hash to the clipboard.');}};
   const facts=[['Container',a.facts.container],['Encoding',a.facts.codec || 'Not determined'],['Sample rate',rate(a.facts.sample_rate)],['Channels',a.facts.channels==null?'Not determined':`${a.facts.channels} ${a.facts.channels===1?'(mono)':a.facts.channels===2?'(stereo)':''}`],['Bit depth',a.facts.bit_depth==null?'Not determined':`${a.facts.bit_depth}-bit`],['Duration',duration(a.facts.duration)]];
   return <main className="content autopsy-page">
@@ -32,10 +45,11 @@ export function Autopsy({workspace,onImport,onPage}:{workspace:Workspace;onImpor
       </div>
       <div className="target-foot"><div><span>MAGIC BYTES</span><strong>{a.magic}</strong></div><div><span>DETECTED FORMAT</span><strong>{a.facts.container}</strong></div><div><span>EXTENSION CHECK</span><strong className={a.extension_mismatch?'warning-text':'good-text'}>{a.format==='Unknown'?'NOT DETERMINED':a.extension_mismatch?'MISMATCH':'MATCH'}</strong></div><button onClick={()=>onPage('metadata')}>VIEW METADATA <ArrowRight size={13}/></button></div>
     </section>
+    <AudioPlayback workspace={workspace} file={file} onPosition={syncPlayback} seekRequest={seekRequest}/>
     <div className="autopsy-grid">
       <div className="autopsy-main-column">
         <section className="panel structure-panel">
-          <PanelTitle number="02" title="FILE STRUCTURE" sub="CONTAINER MAP" action={<span className="panel-count">{String(a.chunks.length).padStart(2,'0')} REGIONS</span>}/>
+          <PanelTitle number="03" title="FILE STRUCTURE" sub="CONTAINER MAP" action={<span className="panel-count">{String(a.chunks.length).padStart(2,'0')} REGIONS</span>}/>
           <div className="structure-intro"><div><span className="structure-glyph"><FileSearch size={16}/></span><div><strong>PARSED STRUCTURE</strong><small>Select a region to highlight its bytes below.</small></div></div><span className="structure-format">{a.format} <ChevronRight size={12}/> BINARY</span></div>
           <div className="structure-table">
             <div className="structure-head"><span>CHUNK / REGION</span><span>OFFSET</span><span>DECLARED</span><span>ACTUAL</span><span>STATUS</span><span/></div>
@@ -45,21 +59,21 @@ export function Autopsy({workspace,onImport,onPage}:{workspace:Workspace;onImpor
           </div>
           <div className="structure-footer"><span><span className="status-dot red"/> SELECTED REGION HIGHLIGHTED IN HEX VIEW</span><span>OFFSETS ARE FILE-RELATIVE</span></div>
         </section>
-        <HexViewer workspace={workspace} file={file} chunk={selectedChunk} offset={offset} onOffset={setOffset}/>
+        <HexViewer workspace={workspace} file={file} chunk={selectedChunk} offset={offset} onOffset={manualOffset} playheadOffset={playheadOffset}/>
       </div>
       <div className="autopsy-side-column">
         <section className="panel profile-panel">
-          <PanelTitle number="04" title="FILE PROFILE" sub="EXTRACTED FACTS"/>
+          <PanelTitle number="05" title="FILE PROFILE" sub="EXTRACTED FACTS"/>
           <div className="profile-list">{facts.map(([label,value])=><div className="profile-row" key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
           <div className="profile-foot"><span><CheckCircle2 size={14}/> {a.format==='Unknown'?'SIGNATURE UNRECOGNIZED':'SIGNATURE IDENTIFIED'}</span><span>{a.format}</span></div>
         </section>
         <section className="panel findings-panel">
-          <PanelTitle number="05" title="STRUCTURAL FINDINGS" action={<span className={`finding-count ${a.warnings.length?'has-warnings':''}`}>{String(a.warnings.length).padStart(2,'0')}</span>}/>
+          <PanelTitle number="06" title="STRUCTURAL FINDINGS" action={<span className={`finding-count ${a.warnings.length?'has-warnings':''}`}>{String(a.warnings.length).padStart(2,'0')}</span>}/>
           {a.warnings.length ? <div className="finding-list">{a.warnings.slice(0,4).map((warning,i)=><div className="finding-item" key={i}><AlertTriangle size={15}/><div><strong>{warning.severity.toUpperCase()}</strong><p>{warning.message}</p></div></div>)}</div> : <div className="clean-finding"><div className="finding-icon"><Check size={16}/></div><div><strong>NO PARSER WARNINGS</strong><p>No structural warnings were raised by this parser.</p></div></div>}
           <div className="finding-note"><Info size={13}/><span>Observations are not a security verdict.</span></div>
         </section>
         <section className="panel metadata-preview">
-          <PanelTitle number="06" title="METADATA" action={<button className="text-link" onClick={()=>onPage('metadata')}>VIEW ALL <ArrowRight size={13}/></button>}/>
+          <PanelTitle number="07" title="METADATA" action={<button className="text-link" onClick={()=>onPage('metadata')}>VIEW ALL <ArrowRight size={13}/></button>}/>
           {a.metadata.length ? <div className="metadata-list">{a.metadata.slice(0,3).map((item,i)=><div className="metadata-line" key={i}><span>{item.key}</span><strong title={item.value}>{item.value || '(empty)'}</strong></div>)}</div> : <div className="no-metadata">No text metadata extracted.</div>}
           <div className="metadata-foot"><span>{a.metadata.length} FIELD{a.metadata.length===1?'':'S'} EXTRACTED</span><span>{a.artwork.length} ARTWORK</span></div>
         </section>

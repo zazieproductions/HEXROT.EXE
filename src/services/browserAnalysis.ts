@@ -2,7 +2,6 @@ import type { Analysis, Chunk, MetadataField, Warning } from '../types';
 
 // A small offline fallback. The backend remains the authoritative full-format parser.
 export async function inspectInBrowser(file:File):Promise<{analysis:Analysis;bytes:Uint8Array}> {
-  if (file.size > 32*1024*1024) throw new Error('File exceeds the 32 MB local limit.');
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer); const view = new DataView(buffer);
   const ascii = (start:number,end:number) => Array.from(bytes.slice(start,end), b => b >= 32 && b <= 126 ? String.fromCharCode(b) : '.').join('');
@@ -34,7 +33,7 @@ export async function inspectInBrowser(file:File):Promise<{analysis:Analysis;byt
       if (little && name==='fmt ' && actual>=16) {
         const code=word(body,true); facts.codec=code===1?'PCM':code===3?'IEEE float':`WAVE codec 0x${code.toString(16).toUpperCase()}`;
         facts.channels=word(body+2,true); facts.sample_rate=u32(body+4,true); byteRate=u32(body+8,true); facts.block_align=word(body+12,true); facts.bit_depth=word(body+14,true);
-      } else if (little && name==='data') dataBytes=actual;
+      } else if (little && name==='data') { dataBytes=actual; chunks[chunks.length-1].audio_offset=body; }
       else if (little && name==='LIST' && ascii(body,body+4)==='INFO') {
         let p=body+4; const stop=body+actual;
         while (p+8<=stop) {
@@ -49,6 +48,8 @@ export async function inspectInBrowser(file:File):Promise<{analysis:Analysis;byt
         const rate=(hi*2**32+lo)/2**63*2**(exponent-16383);
         if (Number.isFinite(rate) && rate>0 && rate<10000000) { facts.sample_rate=Math.round(rate); facts.duration=frames/rate; }
         facts.codec=format==='AIFF'?'PCM':actual>=22?ascii(body+18,body+22):'AIFC';
+      } else if (!little && name==='SSND' && actual>=8) {
+        const soundOffset=u32(body,false); chunks[chunks.length-1].audio_offset=Math.min(body+8+soundOffset,body+actual);
       } else if (!little && ['NAME','AUTH','ANNO','(c) '].includes(name)) {
         metadata.push({key:name,value:new TextDecoder().decode(bytes.slice(body,body+actual)).replace(/\0+$/,''),source:'AIFF',offset:body,byte_length:actual,truncated:false});
       }

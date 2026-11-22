@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import math
+import mmap
 import struct
 from pathlib import Path
 from typing import Any
@@ -84,7 +85,7 @@ def parse_riff_aiff(data: bytes, result: dict, fmt: str) -> None:
         body_end = body + actual
         padded_end = min(limit, body + size + (size & 1))
         truncated = size > limit - body
-        add_chunk(result, name, pos, padded_end, size, actual, 'chunk', 'warning' if truncated else 'ok', 'Truncated chunk' if truncated else '')
+        chunk_item = add_chunk(result, name, pos, padded_end, size, actual, 'chunk', 'warning' if truncated else 'ok', 'Truncated chunk' if truncated else '')
         if truncated:
             warning(result, f'{name} chunk declares {size} bytes but only {actual} are available.', pos + 4)
         if fmt == 'WAV' and raw_id == b'fmt ' and actual >= 16:
@@ -93,6 +94,7 @@ def parse_riff_aiff(data: bytes, result: dict, fmt: str) -> None:
                                     'channels': channels, 'sample_rate': rate, 'bit_depth': bits, 'block_align': align})
         elif fmt == 'WAV' and raw_id == b'data':
             data_bytes = actual
+            chunk_item['audio_offset'] = body
         elif fmt == 'WAV' and raw_id == b'LIST':
             parse_info(data, body, body_end, result)
         elif fmt != 'WAV' and raw_id == b'COMM' and actual >= 18:
@@ -101,6 +103,9 @@ def parse_riff_aiff(data: bytes, result: dict, fmt: str) -> None:
             codec = 'PCM' if fmt == 'AIFF' else (label(data[body+18:body+22]) if actual >= 22 else 'AIFC')
             result['facts'].update({'codec': codec, 'channels': channels, 'sample_rate': round(rate) if rate else None, 'bit_depth': bits,
                                     'duration': round(frames / rate, 6) if rate else None})
+        elif fmt != 'WAV' and raw_id == b'SSND' and actual >= 8:
+            sound_offset = int.from_bytes(data[body:body+4], endian)
+            chunk_item['audio_offset'] = min(body + 8 + sound_offset, body_end)
         elif fmt != 'WAV' and raw_id in (b'NAME', b'AUTH', b'ANNO', b'(c) '):
             add_metadata(result, name, data[body:body_end], 'AIFF', body)
         if truncated:
@@ -146,7 +151,8 @@ def parse_flac(data: bytes, result: dict) -> None:
     if not last:
         warning(result, 'FLAC metadata blocks do not terminate cleanly.', pos)
     elif pos < len(data):
-        add_chunk(result, 'AUDIO FRAMES', pos, len(data), len(data)-pos, len(data)-pos, 'audio')
+        chunk = add_chunk(result, 'AUDIO FRAMES', pos, len(data), len(data)-pos, len(data)-pos, 'audio')
+        chunk['audio_offset'] = pos
 
 
 def syncsafe(raw: bytes) -> int:
@@ -159,7 +165,7 @@ def syncsafe(raw: bytes) -> int:
 def parse_mp3(data: bytes, result: dict) -> None:
     pos = 0
     result['facts']['codec'] = 'MPEG audio'
-    if data.startswith(b'ID3') and len(data) >= 10:
+    if data[:3] == b'ID3' and len(data) >= 10:
         version = data[3]
         size = syncsafe(data[6:10])
         end = min(len(data), 10 + size)
@@ -193,17 +199,28 @@ def parse_mp3(data: bytes, result: dict) -> None:
     else:
         audio_end = len(data)
     if audio_end > pos:
-        add_chunk(result, 'MPEG FRAMES', pos, audio_end, audio_end-pos, audio_end-pos, 'audio')
+        chunk = add_chunk(result, 'MPEG FRAMES', pos, audio_end, audio_end-pos, audio_end-pos, 'audio')
+        chunk['audio_offset'] = pos
     result['chunks'].sort(key=lambda c:c['offset'])
 
 
 def analyze(path: Path, filename: str) -> dict[str, Any]:
-    data = path.read_bytes()
+    """Analyze through a read-only mapping so large files do not need a RAM copy."""
+    with path.open('rb') as source:
+        source.seek(0,2)
+        if source.tell() == 0:
+            return _analyze_data(b'',path,filename)
+        source.seek(0)
+        with mmap.mmap(source.fileno(),0,access=mmap.ACCESS_READ) as data:
+            return _analyze_data(data,path,filename)
+
+
+def _analyze_data(data: Any, path: Path, filename: str) -> dict[str, Any]:
     ext = Path(filename).suffix.lower()
-    if data.startswith(b'RIFF') and data[8:12] == b'WAVE': fmt = 'WAV'
-    elif data.startswith(b'FORM') and data[8:12] in (b'AIFF', b'AIFC'): fmt = data[8:12].decode('ascii')
-    elif data.startswith(b'fLaC'): fmt = 'FLAC'
-    elif data.startswith(b'ID3') or (len(data) >= 2 and data[0] == 0xff and data[1] & 0xe0 == 0xe0): fmt = 'MP3'
+    if data[:4] == b'RIFF' and data[8:12] == b'WAVE': fmt = 'WAV'
+    elif data[:4] == b'FORM' and data[8:12] in (b'AIFF', b'AIFC'): fmt = data[8:12].decode('ascii')
+    elif data[:4] == b'fLaC': fmt = 'FLAC'
+    elif data[:3] == b'ID3' or (len(data) >= 2 and data[0] == 0xff and data[1] & 0xe0 == 0xe0): fmt = 'MP3'
     else: fmt = 'Unknown'
     expected = {'WAV': {'.wav','.wave'}, 'AIFF':{'.aiff','.aif'}, 'AIFC':{'.aifc','.aiff','.aif'}, 'FLAC':{'.flac'}, 'MP3':{'.mp3'}}
     result: dict[str, Any] = {'filename': filename, 'size':len(data), 'sha256':hashlib.sha256(data).hexdigest(),

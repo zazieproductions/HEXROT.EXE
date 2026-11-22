@@ -15,6 +15,8 @@ def test_reference_wav_real_structure_and_hash():
     assert [c['name'] for c in result['chunks']] == ['RIFF','fmt ','LIST','data']
     assert result['facts']['sample_rate'] == 8000 and result['facts']['channels'] == 1
     assert result['facts']['bit_depth'] == 16 and result['facts']['duration'] == .25
+    data_chunk=next(c for c in result['chunks'] if c['name']=='data')
+    assert data_chunk['audio_offset']==data_chunk['offset']+8
     assert any(m['key']=='INAM' and m['value']=='HEXROT reference' for m in result['metadata'])
     assert not result['warnings']
     for chunk in result['chunks']:
