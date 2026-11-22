@@ -474,6 +474,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,su
 .hex-line .hex-cols{color:var(--ink);letter-spacing:.02em}
 .hex-line .hex-cols .zero-byte{color:var(--faint)}
 .hex-line .hex-cols span{transition:background .1s,color .1s}
+.hex-line .hex-cols .hex-seekable{cursor:pointer}
+.hex-line .hex-cols .hex-seekable:hover,.hex-line .hex-cols .hex-seekable:focus-visible{outline:1px solid var(--phos);outline-offset:1px;color:var(--phos)}
 .hex-line:hover .hex-cols{color:var(--ink-bright)}
 .hex-line .hex-cols .hex-selected{background:var(--phos);color:#02110a;box-shadow:0 0 10px -2px var(--phos-glow)}
 .hex-ascii{color:var(--muted);white-space:pre;letter-spacing:.02em}
