@@ -1,18 +1,21 @@
 """Loopback-only local API for the HEXROT workstation."""
 from __future__ import annotations
 import base64
+import mimetypes
 import os
 import re
 import shlex
 import tempfile
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from backend.analysis.differential import compare
-from backend.config import MAX_FILE_SIZE, MAX_METADATA_VALUE, MAX_MUTATIONS
+from backend.config import MAX_METADATA_VALUE, MAX_MUTATIONS
 from backend.decoders.adapters import inventory
 from backend.mutation.engine import DEFAULT_STRATEGIES, STRATEGIES, MutationError, generate, generate_batch
 from backend.reports.export import bundle, render
@@ -22,18 +25,22 @@ from backend.workers.jobs import JobManager
 from backend.workers.runner import execute
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCAL_ORIGIN = r'^https?://(localhost|127\.0\.0\.1|\\[::1\\])(:\\d+)?$'
+LOCAL_ORIGIN = r'^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$'
 
 
 class RequestSizeLimit:
-    """Bound the request before multipart parsing can spool an oversized upload."""
+    """Bound small JSON POSTs without buffering or capping streamed file uploads."""
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http' or scope.get('method') != 'POST':
             return await self.app(scope, receive, send)
-        limit = MAX_FILE_SIZE + 1024 * 1024 if scope.get('path') == '/api/sessions/upload' else 1024 * 1024
+        if scope.get('path') == '/api/sessions/upload':
+            # Starlette's multipart parser spools large file parts to disk. Let it
+            # stream normally rather than buffering the whole request here.
+            return await self.app(scope, receive, send)
+        limit = 1024 * 1024
         headers = dict(scope.get('headers', []))
         try:
             declared = int(headers.get(b'content-length', b'0'))
@@ -62,7 +69,7 @@ class MutationRequest(BaseModel):
     count: int = Field(default=5,ge=1,le=MAX_MUTATIONS)
     seed: int = Field(default=42,ge=0,le=2**32-1)
     strategies: list[str] = Field(default_factory=lambda: DEFAULT_STRATEGIES.copy(),min_length=1,max_length=16)
-    max_file_size: int = Field(default=MAX_FILE_SIZE,ge=1,le=MAX_FILE_SIZE)
+    max_file_size: int | None = Field(default=None,ge=1,description='Optional generated-variant output ceiling; null means no ceiling')
     metadata_size: int = Field(default=8192,ge=0,le=MAX_METADATA_VALUE)
     region: str = Field(default='any',max_length=100)
     deduplicate: bool = Field(default=True, description='Skip mutations whose output hash matches a previous result')
@@ -154,7 +161,7 @@ def create_app(db_root: Path | None = None) -> FastAPI:
     app = FastAPI(title='HEXROT.EXE local API',version='0.2.0')
     db = Database(db_root); jobs = JobManager(db)
     app.state.db = db; app.state.jobs = jobs
-    app.add_middleware(CORSMiddleware,allow_origin_regex=LOCAL_ORIGIN,allow_credentials=False,allow_methods=['GET','POST'],allow_headers=['Content-Type'])
+    app.add_middleware(CORSMiddleware,allow_origin_regex=LOCAL_ORIGIN,allow_credentials=False,allow_methods=['GET','POST'],allow_headers=['Content-Type','Range'])
     app.add_middleware(RequestSizeLimit)
 
     @app.middleware('http')
@@ -182,7 +189,7 @@ def create_app(db_root: Path | None = None) -> FastAPI:
     @app.get('/api/health')
     def health():
         return {'status':'online','version':'0.2.0','isolation':isolation_status(),'decoders':inventory(),
-                'limits':{'max_file_size':MAX_FILE_SIZE,'max_mutations':MAX_MUTATIONS,'strategies':sorted(STRATEGIES)}}
+                'limits':{'max_file_size':None,'max_mutations':MAX_MUTATIONS,'strategies':sorted(STRATEGIES)}}
 
     @app.get('/api/sessions')
     def sessions(): return db.list_sessions()
@@ -197,15 +204,14 @@ def create_app(db_root: Path | None = None) -> FastAPI:
 
     @app.post('/api/sessions/upload')
     async def upload(file: UploadFile = File(...)):
-        data = bytearray()
-        while True:
-            chunk = await file.read(1024*1024)
-            if not chunk: break
-            data.extend(chunk)
-            if len(data)>MAX_FILE_SIZE: raise HTTPException(413,f'File exceeds {MAX_FILE_SIZE} bytes')
-        if not data: raise HTTPException(400,'Empty files are not accepted')
+        # UploadFile is backed by a spooled temporary file, so copying and parsing
+        # happen from disk without retaining an arbitrarily large request in RAM.
+        file.file.seek(0,os.SEEK_END)
+        size = file.file.tell()
+        file.file.seek(0)
+        if not size: raise HTTPException(400,'Empty files are not accepted')
         session = db.create_session(file.filename or 'upload.bin')
-        item = db.add_file(session['id'],file.filename or 'upload.bin',bytes(data),'original')
+        item = await run_in_threadpool(db.add_file_stream, session['id'], file.filename or 'upload.bin', file.file, 'original')
         return {'session':session,'file':item}
 
     @app.get('/api/sessions/{sid}')
@@ -237,6 +243,54 @@ def create_app(db_root: Path | None = None) -> FastAPI:
         file = require_file(sid,fid,True)
         return FileResponse(file['path'],media_type='application/octet-stream',filename=file['name'])
 
+    @app.get('/api/sessions/{sid}/files/{fid}/media')
+    def media(sid: str, fid: str, request: Request):
+        """Stream audio for the player and support byte ranges for seeking."""
+        file = require_file(sid,fid,True)
+        path = Path(file['path'])
+        size = path.stat().st_size
+        start, end, status_code = 0, size - 1, 200
+        range_header = request.headers.get('range')
+        if range_header:
+            match = re.fullmatch(r'bytes=(\d*)-(\d*)', range_header.strip(), flags=re.IGNORECASE)
+            if not match or ',' in range_header or size == 0:
+                raise HTTPException(416,'Requested byte range is not satisfiable',headers={'Content-Range':f'bytes */{size}'})
+            first, last = match.groups()
+            if first:
+                start = int(first)
+                end = int(last) if last else size - 1
+            else:
+                suffix = int(last or '0')
+                if suffix <= 0:
+                    raise HTTPException(416,'Requested byte range is not satisfiable',headers={'Content-Range':f'bytes */{size}'})
+                start, end = max(0,size-suffix), size-1
+            end = min(end,size-1)
+            if start >= size or start > end:
+                raise HTTPException(416,'Requested byte range is not satisfiable',headers={'Content-Range':f'bytes */{size}'})
+            status_code = 206
+        length = max(0,end-start+1)
+        headers = {
+            'Accept-Ranges':'bytes',
+            'Content-Length':str(length),
+            'Content-Disposition':f"inline; filename*=UTF-8''{quote(file['name'],safe='')}",
+        }
+        if status_code == 206:
+            headers['Content-Range'] = f'bytes {start}-{end}/{size}'
+        media_type = mimetypes.guess_type(file['name'])[0] or 'application/octet-stream'
+
+        def read_range():
+            with path.open('rb') as source:
+                source.seek(start)
+                remaining = length
+                while remaining:
+                    chunk = source.read(min(1024*1024,remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        return StreamingResponse(read_range(),status_code=status_code,media_type=media_type,headers=headers)
+
     @app.post('/api/sessions/{sid}/mutations')
     def mutations(sid: str, request: MutationRequest):
         require_session(sid)
@@ -245,7 +299,8 @@ def create_app(db_root: Path | None = None) -> FastAPI:
         original = next((f for f in db.list_files(sid,True) if f['kind']=='original'),None)
         if not original: raise HTTPException(404,'Original not found')
         data = Path(original['path']).read_bytes()
-        if len(data)>request.max_file_size: raise HTTPException(422,'Original exceeds configured size limit')
+        if request.max_file_size is not None and len(data)>request.max_file_size:
+            raise HTTPException(422,'Original exceeds configured mutation output limit')
         outputs = generate_batch(data, original['analysis'], request.count, request.seed,
                                   request.strategies, request.max_file_size, request.region,
                                   request.metadata_size, deduplicate=request.deduplicate)

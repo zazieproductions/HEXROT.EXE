@@ -55,8 +55,8 @@ Counts embedded in diagrams:
 
 | Value | Source |
 |---|---|
-| 56 collected / 50 passed / 6 skipped | `python -m pytest -q` |
-| 15 endpoints | `backend/main.py` route decorators |
+| 58 collected / 52 passed / 6 skipped | `python -m pytest -q` |
+| 16 endpoints | `backend/main.py` route decorators |
 | 16 strategies | `STRATEGIES` in `backend/mutation/engine.py` |
 | 3 decoders | `ADAPTERS` in `backend/decoders/adapters.py` |
 | 7 CI jobs | `.github/workflows/verify.yml` |

@@ -2,11 +2,12 @@
 from __future__ import annotations
 import json
 import os
+import shutil
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 from backend.config import HOME
 from backend.parsers.audio import analyze
 
@@ -66,6 +67,27 @@ class Database:
         with path.open('xb') as f:
             os.chmod(path, 0o600)
             f.write(data)
+        return self._index_file(session_id,file_id,name,path,kind,mutation)
+
+    def add_file_stream(self, session_id: str, name: str, source: BinaryIO, kind: str,
+                        mutation: dict | None = None) -> dict:
+        """Copy an already-spooled upload into its private UUID file in bounded memory."""
+        if not self.get_session(session_id): raise KeyError('Session not found')
+        file_id = uuid.uuid4().hex
+        name = clean_name(name)
+        path = self.root / session_id / file_id
+        try:
+            source.seek(0)
+            with path.open('xb') as destination:
+                os.chmod(path, 0o600)
+                shutil.copyfileobj(source,destination,length=1024*1024)
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        return self._index_file(session_id,file_id,name,path,kind,mutation)
+
+    def _index_file(self, session_id: str, file_id: str, name: str, path: Path,
+                    kind: str, mutation: dict | None = None) -> dict:
         try:
             analysis = analyze(path, name)
             item = {'id':file_id, 'session_id':session_id, 'name':name, 'path':str(path), 'kind':kind,

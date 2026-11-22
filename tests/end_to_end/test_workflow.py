@@ -1,7 +1,9 @@
+import asyncio
 import base64
 import hashlib
 import os
 import time
+import httpx
 from pathlib import Path
 import psutil
 import pytest
@@ -90,6 +92,8 @@ def test_local_origin_and_path_safety(tmp_path):
     client=TestClient(create_app(tmp_path))
     assert client.get('/api/health',headers={'host':'evil.example'}).status_code==403
     assert client.post('/api/sessions/demo',headers={'origin':'https://evil.example'}).status_code==403
+    local=client.get('/api/health',headers={'origin':'http://localhost:5173'})
+    assert local.status_code==200 and local.headers['access-control-allow-origin']=='http://localhost:5173'
     response=client.post('/api/sessions/upload',files={'file':('../../outside.wav',FIX.read_bytes(),'audio/wav')})
     assert response.status_code==200 and response.json()['file']['name']=='outside.wav'
     assert not (tmp_path.parent/'outside.wav').exists()
@@ -111,6 +115,54 @@ def test_request_limit_rejects_oversized_content_length(tmp_path):
     assert response.status_code==413
 
 
+def test_upload_streams_file_larger_than_previous_32_mib_limit(tmp_path):
+    app=create_app(tmp_path)
+    size=32*1024*1024+1
+    boundary='HEXROT-STREAM-TEST'
+    prefix=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="large.bin"\r\n'
+            'Content-Type: application/octet-stream\r\n\r\n').encode()
+    suffix=f'\r\n--{boundary}--\r\n'.encode()
+    block=bytes(1024*1024)
+
+    async def body():
+        yield prefix
+        for _ in range(size//len(block)):
+            yield block
+        remainder=size%len(block)
+        if remainder:
+            yield bytes(remainder)
+        yield suffix
+
+    async def upload():
+        transport=httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport,base_url='http://testserver') as client:
+            return await client.post('/api/sessions/upload',content=body(),
+                                     headers={'content-type':f'multipart/form-data; boundary={boundary}'})
+
+    response=asyncio.run(upload())
+    assert response.status_code==200, response.text
+    analysis=response.json()['file']['analysis']
+    expected=hashlib.sha256()
+    for _ in range(size//len(block)):
+        expected.update(block)
+    expected.update(bytes(size%len(block)))
+    assert analysis['size']==size and analysis['sha256']==expected.hexdigest()
+
+
+def test_media_route_supports_byte_ranges(tmp_path):
+    client=TestClient(create_app(tmp_path))
+    created=client.post('/api/sessions/demo').json()
+    sid=created['session']['id']; fid=created['file']['id']; original=FIX.read_bytes()
+    response=client.get(f'/api/sessions/{sid}/files/{fid}/media',headers={'range':'bytes=8-23','origin':'http://localhost:5173'})
+    assert response.status_code==206
+    assert response.headers['content-range']==f'bytes 8-23/{len(original)}'
+    assert response.headers['accept-ranges']=='bytes'
+    assert response.headers['access-control-allow-origin']=='http://localhost:5173'
+    assert response.headers['content-type'].startswith('audio/')
+    assert response.content==original[8:24]
+    assert client.get(f'/api/sessions/{sid}/files/{fid}/media',headers={'range':'bytes=999999-'}).status_code==416
+
+
 def test_html_report_escapes_file_metadata(tmp_path):
     client=TestClient(create_app(tmp_path))
     data=FIX.read_bytes().replace(b'HEXROT reference',b'<script>alert(1)')
@@ -125,6 +177,7 @@ def test_health_returns_version_and_strategies(tmp_path):
     client = TestClient(create_app(tmp_path))
     health = client.get('/api/health').json()
     assert health['version'] == '0.2.0'
+    assert health['limits']['max_file_size'] is None
     assert 'strategies' in health['limits']
     assert 'boundary_min' in health['limits']['strategies']
     assert 'header_boundary' in health['limits']['strategies']

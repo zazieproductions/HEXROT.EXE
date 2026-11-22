@@ -8,7 +8,7 @@ import { PanelTitle } from './Chrome';
 const PAGE=160;
 const printable=(b:number)=>b>=32&&b<=126?String.fromCharCode(b):'.';
 
-export function HexViewer({workspace,file,chunk,offset,onOffset}:{workspace:Workspace;file:FileRecord;chunk:Chunk | null;offset:number;onOffset:(n:number)=>void}) {
+export function HexViewer({workspace,file,chunk,offset,onOffset,playheadOffset=null}:{workspace:Workspace;file:FileRecord;chunk:Chunk | null;offset:number;onOffset:(n:number)=>void;playheadOffset?:number|null}) {
   const [bytes,setBytes]=useState<Uint8Array>(new Uint8Array());
   const [jump,setJump]=useState('00000000'); const [loadError,setLoadError]=useState('');
   useEffect(()=>{setJump(offset.toString(16).toUpperCase().padStart(8,'0'));},[offset]);
@@ -23,14 +23,14 @@ export function HexViewer({workspace,file,chunk,offset,onOffset}:{workspace:Work
   const inChunk=(absolute:number)=>!!chunk && absolute>=chunk.offset && absolute<chunk.end;
   const highlightEnd=chunk ? Math.min(chunk.end, offset+bytes.length) : 0;
   return <section className="panel hex-panel">
-    <PanelTitle number="03" title="HEX VIEWER" sub="BYTE-LEVEL INSPECTION" action={<div className="panel-actions"><span className="live-indicator"><span className="status-dot red"/>CURSOR 0x{(offset).toString(16).toUpperCase().padStart(8,'0')}</span></div>}/>
+    <PanelTitle number="04" title="HEX VIEWER" sub="BYTE-LEVEL INSPECTION" action={<div className="panel-actions"><span className="live-indicator"><span className={`status-dot ${playheadOffset!==null?'green':'red'}`}/>{playheadOffset!==null?'PLAYHEAD':'CURSOR'} {hexOffset(playheadOffset??offset)}</span></div>}/>
     <div className="hex-toolbar"><div><Crosshair size={13}/><span>{chunk?`SELECTED: ${chunk.name.trim()}`:'SELECT A STRUCTURE REGION'}</span></div><div className="offset-control"><label htmlFor="hex-offset">OFFSET</label><span>0x</span><input id="hex-offset" value={jump} onChange={e=>setJump(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')go();}} aria-label="Jump to hexadecimal offset"/><button onClick={go} aria-label="Go to offset"><CornerDownLeft size={12}/></button></div></div>
     <div className="hex-scroll">
       <div className="hex-head"><span>OFFSET</span><span className="hex-cols">{Array.from({length:16},(_,i)=><span key={i}>{i.toString(16).toUpperCase().padStart(2,'0')}</span>)}</span><span>ASCII</span></div>
       {loadError ? <div className="hex-error">{loadError}</div> : lines.length ? lines.map((line,row)=><div className="hex-line" key={offset+row*16}>
         <span className="hex-offset">{(offset+row*16).toString(16).toUpperCase().padStart(8,'0')}</span>
-        <span className="hex-cols">{Array.from({length:16},(_,col)=>{const byte=line[col];const absolute=offset+row*16+col;const highlighted=byte!==undefined && inChunk(absolute); return <span key={col} className={`${highlighted?'hex-selected':''} ${byte===0?'zero-byte':''}`}>{byte===undefined?'--':byte.toString(16).toUpperCase().padStart(2,'0')}</span>;})}</span>
-        <span className="hex-ascii">{Array.from(line,(b,col)=>{const absolute=offset+row*16+col;const on=inChunk(absolute);return <span key={col} className={on?'ascii-hi':b===0?'ascii-dim':''}>{printable(b)}</span>;})}</span>
+        <span className="hex-cols">{Array.from({length:16},(_,col)=>{const byte=line[col];const absolute=offset+row*16+col;const highlighted=byte!==undefined && inChunk(absolute); return <span key={col} className={`${highlighted?'hex-selected':''} ${absolute===playheadOffset?'hex-playhead':''} ${byte===0?'zero-byte':''}`}>{byte===undefined?'--':byte.toString(16).toUpperCase().padStart(2,'0')}</span>;})}</span>
+        <span className="hex-ascii">{Array.from(line,(b,col)=>{const absolute=offset+row*16+col;const on=inChunk(absolute);return <span key={col} className={`${on?'ascii-hi':b===0?'ascii-dim':''} ${absolute===playheadOffset?'ascii-playhead':''}`}>{printable(b)}</span>;})}</span>
       </div>) : <div className="hex-error">No bytes at this offset.</div>}
     </div>
     <div className="hex-footer"><span>OFFSET-ALIGNED VIEW <b>/</b> {bytes.length} BYTES LOADED {chunk&&<><b>/</b> {Math.max(0,highlightEnd-chunk.offset)} IN REGION</>}</span><div><button onClick={()=>onOffset(Math.max(0,offset-PAGE))} disabled={offset===0} aria-label="Previous bytes"><ArrowLeft size={12}/></button><span>{hexOffset(offset)}</span><button onClick={()=>onOffset(Math.min(Math.floor(Math.max(0,file.analysis.size-1)/16)*16,offset+PAGE))} disabled={offset+PAGE>=file.analysis.size} aria-label="Next bytes"><ArrowRight size={12}/></button></div></div>

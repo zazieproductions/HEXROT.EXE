@@ -199,7 +199,7 @@ def hero():
                            "malformed variants, run allowlisted decoders inside an OS sandbox, compare observed "
                            "outcomes, and preserve reproducible evidence.", 610, size=11, leading=17, max_lines=3))
     chips = [("v0.2.0", RED), ("16 STRATEGIES", PURPLE), ("3 DECODERS", AMBER),
-             ("56 TESTS", GREEN), ("MIT", CYAN)]
+             ("58 TESTS", GREEN), ("MIT", CYAN)]
     x = 70
     for label, color in chips:
         w = len(label) * 7.4 + 26
@@ -281,10 +281,10 @@ def architecture():
     s.append(zone(40, 336, 1360, 220, GREEN, "02", "LOCAL API — LOOPBACK ONLY",
                   "FastAPI · port 8000 · no authentication"))
     s.append(card(62, 386, 338, 146, GREEN, "REQUEST GUARD",
-                  "Loopback Host, client, and origin are checked before routing. Uploads are bounded before multipart spooling. Two methods: GET and POST.", kicker="middleware"))
+                  "Loopback Host, client, and origin are checked before routing. Uploads spool to disk without a size cap. Two methods: GET and POST.", kicker="middleware"))
     s.append(card(418, 386, 552, 146, GREEN, "ROUTER · /api",
-                  "sessions · demo · upload · files/{id}/bytes · compare · download\n"
-                  "sessions/{id}/mutations · jobs · differential · runs/{id}/triage · report", kicker="15 endpoints"))
+                  "sessions · demo · upload · files/{id}/bytes · compare · download · media\n"
+                  "sessions/{id}/mutations · jobs · differential · runs/{id}/triage · report", kicker="16 endpoints"))
     s.append(card(988, 386, 390, 146, AMBER, "JOB MANAGER",
                   "Threads one decoder job at a time. Progress counts completed process executions. Startup marks stale jobs interrupted.", kicker="single flight"))
 
@@ -413,7 +413,7 @@ def trust():
     host_items = [
         ("BACKEND CORE", "stdlib parsers, Mutagen, mutation engine, analysis, report rendering"),
         ("WORKSPACE", "~/.hexrot · SQLite WAL · UUID files · 0700/0600 permissions"),
-        ("UPLOAD PATH", "32 MiB cap · bounded before multipart spool · names sanitized"),
+        ("UPLOAD PATH", "No application cap · spooled to disk · names sanitized"),
         ("NOT DEFENDED", "a hostile process on the same account, the kernel, or a compromised dependency"),
     ]
     for i, (name, desc) in enumerate(host_items):
@@ -494,21 +494,21 @@ def trust():
 def verification():
     s = []
     s.append(txt(60, 42, "VERIFICATION MATRIX", size=14, fill=TEXT, weight=700, ls=1.8))
-    s.append(txt(60, 62, "56 collected tests · 50 passed · 6 environment-gated skips · 7 CI jobs.", size=9.5, fill=DIM))
-    s.append(txt(1340, 50, "RUN 2026-11-19 / PYTHON 3.11.2", size=8, fill=DIM, anchor="end", ls=1.4))
+    s.append(txt(60, 62, "58 collected tests · 52 passed · 6 environment-gated skips · 7 CI jobs.", size=9.5, fill=DIM))
+    s.append(txt(1340, 50, "RUN 2026-11-22 / PYTHON 3.11.2", size=8, fill=DIM, anchor="end", ls=1.4))
     s.append(line(60, 78, 1340, 78, BORDER))
 
     # donut
     cx, cy, r, sw = 300, 270, 104, 30
     c = 2 * 3.141592653589793 * r
-    passed, total = 50, 56
+    passed, total = 52, 58
     frac = passed / total
     s.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{AMBER}" stroke-width="{sw}" opacity=".85"/>')
     s.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{GREEN}" stroke-width="{sw}" '
              f'stroke-dasharray="{c * frac:.2f} {c:.2f}" stroke-linecap="butt" transform="rotate(-90 {cx} {cy})"/>')
-    s.append(txt(cx, cy - 6, "50", size=38, fill=TEXT, weight=700, anchor="middle"))
-    s.append(txt(cx, cy + 18, "/ 56 PASSING", size=9, fill=GREEN, anchor="middle", ls=1.2))
-    s.append(txt(cx, cy + 36, "89.3%", size=9, fill=DIM, anchor="middle"))
+    s.append(txt(cx, cy - 6, "52", size=38, fill=TEXT, weight=700, anchor="middle"))
+    s.append(txt(cx, cy + 18, "/ 58 COLLECTED", size=9, fill=GREEN, anchor="middle", ls=1.2))
+    s.append(txt(cx, cy + 36, "89.7%", size=9, fill=DIM, anchor="middle"))
     s.append(f'<rect x="{cx - 90}" y="140" width="10" height="10" rx="2" fill="{GREEN}"/>')
     s.append(txt(cx - 74, 148, "PASS", size=8, fill=GREEN, ls=1.2))
     s.append(f'<rect x="{cx + 8}" y="140" width="10" height="10" rx="2" fill="{AMBER}"/>')
@@ -523,7 +523,7 @@ def verification():
         ("Unit · supervisor", 3, 3, 0, GREEN),
         ("Unit · triage", 4, 4, 0, GREEN),
         ("Integration · sandbox", 4, 0, 4, RED),
-        ("End-to-end · API", 13, 12, 1, AMBER),
+        ("End-to-end · API", 15, 14, 1, AMBER),
     ]
     bx, by, bw = 590, 124, 700
     scale = bw / 20
@@ -559,7 +559,7 @@ def verification():
     s.append(rect(60, 618, 1280, 54, PANEL, BORDER, 8))
     s.append(f'<circle cx="82" cy="645" r="4" fill="{GREEN}"/>')
     s.append(txt(96, 641, "TYPECHECK + BUILD", size=8.5, fill=TEXT, weight=700, ls=.8))
-    s.append(txt(96, 656, "tsc --noEmit clean · vite production bundle 1,053.79 kB (652.33 kB gzip)", size=8, fill=DIM))
+    s.append(txt(96, 656, "tsc --noEmit clean · vite production bundle 858.87 kB (480.45 kB gzip)", size=8, fill=DIM))
     s.append(txt(1320, 645, "PASS", size=9, fill=GREEN, anchor="end", weight=700, ls=1))
     s.append(txt(60, 700, "Historical logs in docs/pytest-output.txt and docs/ui-e2e-output.json describe an earlier build; they are provenance, not current verification.", size=7.8, fill=DIM))
     return document(1400, 730, "".join(s), GREEN, "HEXROT.EXE verification matrix")
@@ -577,7 +577,7 @@ def guardrails():
 
     rows = [
         ("INPUT SURFACE", CYAN, [
-            ("32 MiB", "upload cap", "rejected before multipart spool", .75),
+            ("No cap", "upload size", "disk and parser resources still apply", .75),
             ("50", "variants / request", "generation loop is bounded", .42),
             ("64 KiB", "metadata value", "larger values rejected", .55),
             ("4096", "parsed chunks", "then parsing stops with a warning", .68),

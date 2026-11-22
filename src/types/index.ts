@@ -2,7 +2,7 @@ export type Page = 'autopsy' | 'metadata' | 'mutator' | 'decoder' | 'differentia
 
 export interface Chunk {
   id: string; name: string; offset: number; end: number; declared_size: number; actual_size: number;
-  kind: string; status: string; detail: string;
+  kind: string; status: string; detail: string; audio_offset?: number;
 }
 export interface Warning { severity: string; message: string; offset: number | null }
 export interface Heuristic { kind: string; detail: string; offset: number | null }
@@ -15,11 +15,11 @@ export interface Analysis {
   warnings: Warning[]; heuristics: Heuristic[]; trailing_bytes: number;
 }
 export interface Edit { offset:number; old_length:number; new_length:number; before_hex:string; after_hex:string; before_sha256:string; after_sha256:string; preview_truncated:boolean; description:string }
-export interface Mutation { strategy:string; seed:number; index:number; region:string; size_limit:number; metadata_size:number; edits:Edit[]; original_sha256:string; sha256:string }
+export interface Mutation { strategy:string; seed:number; index:number; region:string; size_limit:number|null; metadata_size:number; edits:Edit[]; original_sha256:string; sha256:string }
 export interface FileRecord { id:string; session_id:string; name:string; kind:string; created_at:string; analysis:Analysis; mutation:Mutation | null }
 export interface Session { id:string; name:string; created_at:string; file_count?:number }
 export interface Tool { id:string; label:string; available:boolean; version:string | null }
-export interface Health { status:string; version:string; isolation:{available:boolean; mechanism:string; reason:string}; decoders:Tool[]; limits:{max_file_size:number; max_mutations:number} }
+export interface Health { status:string; version:string; isolation:{available:boolean; mechanism:string; reason:string}; decoders:Tool[]; limits:{max_file_size:number|null; max_mutations:number} }
 export interface RunResult { decoder:string; version:string | null; invocation:string[]; sandbox_invocation:string[]; exit_code:number | null;
   sandbox_exit_code:number; infrastructure_error:string | null; resource_exceeded:string | null; accepted:boolean | null; abnormal:boolean; signal:number | null; stdout:string; stderr:string; stdout_truncated:boolean; stderr_truncated:boolean;
   duration_seconds:number; timed_out:boolean; canceled:boolean; peak_memory_bytes:number | null; cpu_seconds:number; duration:number | null;

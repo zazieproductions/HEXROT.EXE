@@ -9,6 +9,7 @@ export function useWorkspace() {
   const [detail,setDetail]=useState<Detail|null>(null);
   const [selectedId,setSelectedId]=useState('');
   const [localBytes,setLocalBytes]=useState<Uint8Array|null>(null);
+  const [browserFile,setBrowserFile]=useState<File|null>(null);
   const [health,setHealth]=useState<Health|null>(null);
   const [mode,setMode]=useState<'browser'|'backend'>('browser');
   const [sessions,setSessions]=useState<Session[]>([]);
@@ -21,7 +22,7 @@ export function useWorkspace() {
   const localFile = useCallback(async (file:File) => {
     const {analysis,bytes}=await inspectInBrowser(file);
     const item:FileRecord={id:'browser-file',session_id:'browser',name:file.name,kind:'original',created_at:new Date().toISOString(),analysis,mutation:null};
-    setDetail(emptyDetail(item)); setSelectedId(item.id); setLocalBytes(bytes); setMode('browser'); setComparisons([]);
+    setDetail(emptyDetail(item)); setSelectedId(item.id); setLocalBytes(bytes); setBrowserFile(file); setMode('browser'); setComparisons([]);
   },[]);
   const localDemo = useCallback(async () => {
     const response=await fetch(import.meta.env.BASE_URL + 'fixtures/reference.wav');
@@ -30,7 +31,7 @@ export function useWorkspace() {
   },[localFile]);
   const reload = useCallback(async (sid:string, selected?:string) => {
     const [next,all,cases]=await Promise.all([api.detail(sid),api.sessions(),api.compare(sid)]);
-    setDetail(next); setSessions(all); setComparisons(cases); setMode('backend'); setLocalBytes(null);
+    setDetail(next); setSessions(all); setComparisons(cases); setMode('backend'); setLocalBytes(null); setBrowserFile(null);
     try { localStorage.setItem('hexrot:last-session',sid); } catch { /* storage may be disabled */ }
     setSelectedId(previous => selected || (next.files.some(f=>f.id===previous)?previous:next.files[0]?.id || ''));
   },[]);
@@ -115,7 +116,7 @@ export function useWorkspace() {
     await api.triage(detail.session.id,id); await reload(detail.session.id);
   });
   const selected=detail?.files.find(f=>f.id===selectedId) || detail?.files[0] || null;
-  return {detail,selected,selectedId,setSelectedId,localBytes,health,mode,sessions,comparisons,error,setError,busy,connecting,
+  return {detail,selected,selectedId,setSelectedId,localBytes,browserFile,health,mode,sessions,comparisons,error,setError,busy,connecting,
           activeJob,importFile,loadDemo,openSession,mutate,runJob,cancelJob,triage,connect};
 }
 export type Workspace = ReturnType<typeof useWorkspace>;
