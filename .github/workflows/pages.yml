@@ -1,8 +1,16 @@
 name: Publish browser preview
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+# Serialize Pages deployments so a slow build cannot be overwritten by a
+# faster later one. (Before the Pages source was switched to GitHub Actions,
+# the legacy branch build raced this workflow on every push.)
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -17,7 +25,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build -- --base=/HEXROT.EXE/
+      # vite-plugin-singlefile forces a relative base ("./"), so the build
+      # works under the /HEXROT.EXE/ project subpath with no --base flag
+      # (a CLI --base would be overridden by the plugin anyway).
+      - run: npm run build
+      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

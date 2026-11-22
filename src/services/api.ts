@@ -1,8 +1,15 @@
 import type { Comparison, CompareBytes, Detail, FileRecord, Health, Job, Session, Triage } from '../types';
 
-const BASE = import.meta.env.VITE_HEXROT_API || 'http://127.0.0.1:8000/api';
+const configuredBase = import.meta.env.VITE_HEXROT_API;
+const isLocalHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+// On the published preview (or any non-local origin) there is no loopback API to
+// probe: fetching http://127.0.0.1 from an HTTPS page is blocked as mixed content.
+// Leave BASE empty there so request() fails fast and the app runs browser-only
+// instead of stalling on a doomed connection attempt.
+const BASE = configuredBase ?? (isLocalHost ? 'http://127.0.0.1:8000/api' : '');
 
 async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
+  if (!BASE) throw new Error('Local backend is not configured for this origin. Run the app locally to use persistent sessions and decoder jobs.');
   const response = await fetch(`${BASE}${path}`, { ...options, signal: options.signal || AbortSignal.timeout(8000) });
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
