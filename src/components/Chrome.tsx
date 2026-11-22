@@ -37,6 +37,7 @@ export function TopBar({workspace,page,onPalette}:{workspace:Workspace;page:Page
 }
 
 export function Sidebar({workspace,page,onPage,onImport}:{workspace:Workspace;page:Page;onPage:(p:Page)=>void;onImport:()=>void}) {
+  const egress=workspace.health?.isolation.egress;
   return <aside className="sidebar">
     <div className="sidebar-scroll">
       <div className="side-heading"><span>RESEARCH MODULES</span><span>{String(navigation.findIndex(n=>n.id===page)+1).padStart(2,'0')}/07</span></div>
@@ -54,7 +55,7 @@ export function Sidebar({workspace,page,onPage,onImport}:{workspace:Workspace;pa
       <div className="side-status-title"><span>ENVIRONMENT</span><Activity size={12}/></div>
       <div className="side-status-row"><span>local backend</span><span className={workspace.health?'state-good':'state-muted'}><i className={`status-dot ${workspace.health?'green':'amber'}`}/>{workspace.health?'online':'offline'}</span></div>
       <div className="side-status-row"><span>worker isolation</span><span className={workspace.health?.isolation.available?'state-good':'state-muted'}><i className={`status-dot ${workspace.health?.isolation.available?'green':'grey'}`}/>{workspace.health ? workspace.health.isolation.available?'ready':'unavailable':'no link'}</span></div>
-      <div className="side-status-row"><span>egress policy</span><span className="state-muted"><i className="status-dot grey"/>blocked</span></div>
+      <div className="side-status-row"><span>egress policy</span><span className={egress==='blocked'?'state-good':'state-muted'}><i className={`status-dot ${egress==='blocked'?'green':'grey'}`}/>{workspace.health ? egress==='blocked'?'blocked':egress==='unavailable'?'not isolated':'unknown':'no link'}</span></div>
       {!workspace.health && <button className="reconnect" onClick={()=>workspace.connect(true)}>reconnect engine <ArrowUpRight size={11}/></button>}
       <div className="side-brand"><div className="side-brand-icon"><AudioLines size={15}/></div><div><strong>CHURCH OF MALWARE</strong><small>AUTHORIZED RESEARCH ONLY</small></div><ShieldCheck size={13}/></div>
     </div>

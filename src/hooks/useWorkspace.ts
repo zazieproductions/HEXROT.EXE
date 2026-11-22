@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { inspectInBrowser } from '../services/browserAnalysis';
-import type { Comparison, Detail, FileRecord, Health, Job, Session } from '../types';
+import type { Comparison, Detail, FileRecord, Health, Job, MutationManifest, Session } from '../types';
 
 const emptyDetail = (file:FileRecord):Detail => ({session:{id:'browser',name:file.name,created_at:file.created_at},files:[file],jobs:[],runs:[],triage:[]});
+function saveBlob(blob:Blob, filename:string) {
+  const url=URL.createObjectURL(blob); const anchor=document.createElement('a');
+  anchor.href=url; anchor.download=filename; document.body.appendChild(anchor);
+  anchor.click(); anchor.remove(); window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 
 export function useWorkspace() {
   const [detail,setDetail]=useState<Detail|null>(null);
@@ -14,6 +19,7 @@ export function useWorkspace() {
   const [mode,setMode]=useState<'browser'|'backend'>('browser');
   const [sessions,setSessions]=useState<Session[]>([]);
   const [comparisons,setComparisons]=useState<Comparison[]>([]);
+  const [mutationManifest,setMutationManifest]=useState<MutationManifest|null>(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
   const [connecting,setConnecting]=useState(true);
@@ -22,16 +28,16 @@ export function useWorkspace() {
   const localFile = useCallback(async (file:File) => {
     const {analysis,bytes}=await inspectInBrowser(file);
     const item:FileRecord={id:'browser-file',session_id:'browser',name:file.name,kind:'original',created_at:new Date().toISOString(),analysis,mutation:null};
-    setDetail(emptyDetail(item)); setSelectedId(item.id); setLocalBytes(bytes); setBrowserFile(file); setMode('browser'); setComparisons([]);
+    setDetail(emptyDetail(item)); setSelectedId(item.id); setLocalBytes(bytes); setBrowserFile(file); setMode('browser'); setComparisons([]); setMutationManifest(null);
   },[]);
   const localDemo = useCallback(async () => {
     const response=await fetch(import.meta.env.BASE_URL + 'fixtures/reference.wav');
     if (!response.ok) throw new Error('The generated demo fixture could not be loaded.');
     await localFile(new File([await response.blob()],'reference.wav',{type:'audio/wav'}));
   },[localFile]);
-  const reload = useCallback(async (sid:string, selected?:string) => {
+  const reload = useCallback(async (sid:string, selected?:string, manifest:MutationManifest|null = null) => {
     const [next,all,cases]=await Promise.all([api.detail(sid),api.sessions(),api.compare(sid)]);
-    setDetail(next); setSessions(all); setComparisons(cases); setMode('backend'); setLocalBytes(null); setBrowserFile(null);
+    setDetail(next); setSessions(all); setComparisons(cases); setMode('backend'); setLocalBytes(null); setBrowserFile(null); setMutationManifest(manifest);
     try { localStorage.setItem('hexrot:last-session',sid); } catch { /* storage may be disabled */ }
     setSelectedId(previous => selected || (next.files.some(f=>f.id===previous)?previous:next.files[0]?.id || ''));
   },[]);
@@ -50,6 +56,13 @@ export function useWorkspace() {
       if (notify) setError(`Backend unavailable: ${e instanceof Error?e.message:'connection failed'}. Start the local API to use persistent sessions and decoder jobs.`);
     } finally { setConnecting(false); }
   },[reload]);
+  const probe = useCallback(async () => {
+    try {
+      const current=await api.health(); setHealth(current); setError(''); return current;
+    } catch (e) {
+      setHealth(null); setError(`Backend probe failed: ${e instanceof Error?e.message:'connection failed'}`); return null;
+    }
+  },[]);
   useEffect(() => {
     if (initialized.current) return; initialized.current=true;
     void (async()=>{
@@ -102,7 +115,8 @@ export function useWorkspace() {
   const openSession = (sid:string) => perform(()=>reload(sid));
   const mutate = (body:unknown) => perform(async()=>{
     if (!detail || mode!=='backend') throw new Error('Start the local backend to create persistent mutation files.');
-    await api.mutate(detail.session.id,body); await reload(detail.session.id);
+    const response=await api.mutate(detail.session.id,body);
+    await reload(detail.session.id, undefined, response.manifest);
   });
   const runJob = (body:unknown) => perform(async()=>{
     if (!detail || mode!=='backend') throw new Error('Start the local backend and configure isolation to run decoders.');
@@ -112,11 +126,19 @@ export function useWorkspace() {
     await api.cancel(job.id); if(detail) await reload(detail.session.id);
   });
   const triage = (id:string) => perform(async()=>{
-    if (!detail || mode!=='backend') return;
+    if (!detail || mode!=='backend') throw new Error('Start the local backend to triage real decoder crashes.');
     await api.triage(detail.session.id,id); await reload(detail.session.id);
   });
+  const downloadFile = (file:FileRecord) => perform(async()=>{
+    if (!detail || mode!=='backend') throw new Error('Start the local backend to download workspace files.');
+    saveBlob(await api.download(file.session_id,file.id),file.name);
+  });
+  const exportReport = (format:'json'|'md'|'html') => perform(async()=>{
+    if (!detail || mode!=='backend') throw new Error('Start the local backend to export a persisted evidence report.');
+    saveBlob(await api.report(detail.session.id,format),`hexrot-evidence.${format}`);
+  });
   const selected=detail?.files.find(f=>f.id===selectedId) || detail?.files[0] || null;
-  return {detail,selected,selectedId,setSelectedId,localBytes,browserFile,health,mode,sessions,comparisons,error,setError,busy,connecting,
-          activeJob,importFile,loadDemo,openSession,mutate,runJob,cancelJob,triage,connect};
+  return {detail,selected,selectedId,setSelectedId,localBytes,browserFile,health,mode,sessions,comparisons,mutationManifest,error,setError,busy,connecting,
+          activeJob,importFile,loadDemo,openSession,mutate,runJob,cancelJob,triage,downloadFile,exportReport,probe,connect};
 }
 export type Workspace = ReturnType<typeof useWorkspace>;

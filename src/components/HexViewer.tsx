@@ -8,7 +8,7 @@ import { PanelTitle } from './Chrome';
 const PAGE=160;
 const printable=(b:number)=>b>=32&&b<=126?String.fromCharCode(b):'.';
 
-export function HexViewer({workspace,file,chunk,offset,onOffset,playheadOffset=null}:{workspace:Workspace;file:FileRecord;chunk:Chunk | null;offset:number;onOffset:(n:number)=>void;playheadOffset?:number|null}) {
+export function HexViewer({workspace,file,chunk,offset,onOffset,playheadOffset=null,onSeek,seekable}:{workspace:Workspace;file:FileRecord;chunk:Chunk | null;offset:number;onOffset:(n:number)=>void;playheadOffset?:number|null;onSeek?:(offset:number)=>void;seekable?:(offset:number)=>boolean}) {
   const [bytes,setBytes]=useState<Uint8Array>(new Uint8Array());
   const [jump,setJump]=useState('00000000'); const [loadError,setLoadError]=useState('');
   useEffect(()=>{setJump(offset.toString(16).toUpperCase().padStart(8,'0'));},[offset]);
@@ -21,6 +21,7 @@ export function HexViewer({workspace,file,chunk,offset,onOffset,playheadOffset=n
   const lines=Array.from({length:Math.ceil(bytes.length/16)},(_,i)=>bytes.slice(i*16,i*16+16));
   const go=()=>{const parsed=Number.parseInt(jump.replace(/^0x/i,''),16); if(Number.isFinite(parsed)&&parsed>=0) onOffset(Math.floor(Math.min(parsed,Math.max(0,file.analysis.size-1))/16)*16);};
   const inChunk=(absolute:number)=>!!chunk && absolute>=chunk.offset && absolute<chunk.end;
+  const canSeek=(absolute:number)=>!!onSeek && !!seekable && seekable(absolute);
   const highlightEnd=chunk ? Math.min(chunk.end, offset+bytes.length) : 0;
   return <section className="panel hex-panel">
     <PanelTitle number="04" title="HEX VIEWER" sub="BYTE-LEVEL INSPECTION" action={<div className="panel-actions"><span className="live-indicator"><span className={`status-dot ${playheadOffset!==null?'green':'red'}`}/>{playheadOffset!==null?'PLAYHEAD':'CURSOR'} {hexOffset(playheadOffset??offset)}</span></div>}/>
@@ -29,7 +30,7 @@ export function HexViewer({workspace,file,chunk,offset,onOffset,playheadOffset=n
       <div className="hex-head"><span>OFFSET</span><span className="hex-cols">{Array.from({length:16},(_,i)=><span key={i}>{i.toString(16).toUpperCase().padStart(2,'0')}</span>)}</span><span>ASCII</span></div>
       {loadError ? <div className="hex-error">{loadError}</div> : lines.length ? lines.map((line,row)=><div className="hex-line" key={offset+row*16}>
         <span className="hex-offset">{(offset+row*16).toString(16).toUpperCase().padStart(8,'0')}</span>
-        <span className="hex-cols">{Array.from({length:16},(_,col)=>{const byte=line[col];const absolute=offset+row*16+col;const highlighted=byte!==undefined && inChunk(absolute); return <span key={col} className={`${highlighted?'hex-selected':''} ${absolute===playheadOffset?'hex-playhead':''} ${byte===0?'zero-byte':''}`}>{byte===undefined?'--':byte.toString(16).toUpperCase().padStart(2,'0')}</span>;})}</span>
+        <span className="hex-cols">{Array.from({length:16},(_,col)=>{const byte=line[col];const absolute=offset+row*16+col;const highlighted=byte!==undefined && inChunk(absolute);const seek=byte!==undefined && canSeek(absolute); return <span key={col} role={seek?'button':undefined} tabIndex={seek?0:undefined} title={seek?'Seek audio to this byte':undefined} aria-label={seek?`Seek audio to byte ${hexOffset(absolute)}`:undefined} onClick={seek?()=>onSeek!(absolute):undefined} onKeyDown={seek?(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onSeek!(absolute);}}:undefined} className={`${highlighted?'hex-selected':''} ${absolute===playheadOffset?'hex-playhead':''} ${seek?'hex-seekable':''} ${byte===0?'zero-byte':''}`}>{byte===undefined?'--':byte.toString(16).toUpperCase().padStart(2,'0')}</span>;})}</span>
         <span className="hex-ascii">{Array.from(line,(b,col)=>{const absolute=offset+row*16+col;const on=inChunk(absolute);return <span key={col} className={`${on?'ascii-hi':b===0?'ascii-dim':''} ${absolute===playheadOffset?'ascii-playhead':''}`}>{printable(b)}</span>;})}</span>
       </div>) : <div className="hex-error">No bytes at this offset.</div>}
     </div>

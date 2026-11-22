@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatBytes, hexOffset } from '../services/api';
 import type { Chunk, Page } from '../types';
 import type { Workspace } from '../hooks/useWorkspace';
-import { AudioPlayback } from '../components/AudioPlayback';
+import { AudioPlayback, findAudioRegion } from '../components/AudioPlayback';
 import type { AudioSeekRequest, PlaybackPosition } from '../components/AudioPlayback';
 import { HexViewer } from '../components/HexViewer';
 import { PageHeader, PanelTitle } from '../components/Chrome';
@@ -13,6 +13,8 @@ const rate=(value:number|null) => value==null?'Not determined':`${value.toLocale
 
 export function Autopsy({workspace,onImport,onPage}:{workspace:Workspace;onImport:()=>void;onPage:(page:Page)=>void}) {
   const file=workspace.selected;
+  const audioRegion=file?findAudioRegion(file.analysis):null;
+  const audioRange=audioRegion?.chunk?{start:audioRegion.start,end:audioRegion.end}:null;
   const [selectedChunk,setSelectedChunk]=useState<Chunk|null>(null);
   const [offset,setOffset]=useState(0);
   const [playheadOffset,setPlayheadOffset]=useState<number|null>(null);
@@ -59,7 +61,7 @@ export function Autopsy({workspace,onImport,onPage}:{workspace:Workspace;onImpor
           </div>
           <div className="structure-footer"><span><span className="status-dot red"/> SELECTED REGION HIGHLIGHTED IN HEX VIEW</span><span>OFFSETS ARE FILE-RELATIVE</span></div>
         </section>
-        <HexViewer workspace={workspace} file={file} chunk={selectedChunk} offset={offset} onOffset={manualOffset} playheadOffset={playheadOffset}/>
+        <HexViewer workspace={workspace} file={file} chunk={selectedChunk} offset={offset} onOffset={manualOffset} playheadOffset={playheadOffset} onSeek={requestAudioSeek} seekable={audioRange?(byteOffset=>byteOffset>=audioRange.start&&byteOffset<audioRange.end):undefined}/>
       </div>
       <div className="autopsy-side-column">
         <section className="panel profile-panel">

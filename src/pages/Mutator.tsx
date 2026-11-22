@@ -5,7 +5,15 @@ import { api, decodeBase64, formatBytes, hexOffset } from '../services/api';
 import type { CompareBytes, FileRecord } from '../types';
 import type { Workspace } from '../hooks/useWorkspace';
 
-const choices:[string,string][]=[['default','Default cycle: five strategies'],['header_boundary','Header boundary value'],['chunk_length','Chunk length inconsistency'],['truncation','File truncation'],['duplicate_metadata','Duplicate RIFF INFO field'],['metadata_value','Empty / oversized RIFF INFO value'],['invalid_encoding','Invalid ID3 text encoding marker'],['signature','Container signature inconsistency'],['trailing','Seeded trailing bytes'],['chunk_order','Chunk order change'],['seeded_bytes','Seeded byte mutation']];
+const strategyLabels:Record<string,string>={
+  header_boundary:'Header boundary value',chunk_length:'Chunk length inconsistency',truncation:'File truncation',
+  duplicate_metadata:'Duplicate RIFF INFO field',metadata_value:'Empty / oversized RIFF INFO value',
+  invalid_encoding:'Invalid ID3 text encoding marker',signature:'Container signature inconsistency',
+  trailing:'Seeded trailing bytes',chunk_order:'Chunk order change',seeded_bytes:'Seeded byte mutation',
+  boundary_min:'Zero chunk/block size (min boundary)',boundary_max:'Oversized container size (max boundary)',
+  boundary_off_by_one:'Off-by-one chunk size',zero_length_field:'Zero-length declared field',
+  max_syncsafe:'Maximum syncsafe ID3 tag size',negative_duration:'Zero sample rate / frame count',
+};
 
 function ByteComparison({workspace,file}:{workspace:Workspace;file:FileRecord}) {
   const initial=Math.floor((file.mutation?.edits[0]?.offset || 0)/16)*16;
@@ -27,19 +35,26 @@ export function Mutator({workspace,onInspect}:{workspace:Workspace;onInspect:(id
   const [seed,setSeed]=useState(42); const [count,setCount]=useState(5); const [strategy,setStrategy]=useState('default'); const [region,setRegion]=useState('any'); const [limit,setLimit]=useState(''); const [metadataSize,setMetadataSize]=useState(8192); const [query,setQuery]=useState(''); const [compared,setCompared]=useState<FileRecord|null>(null);
   const original=workspace.detail?.files.find(f=>f.kind==='original');
   const files=(workspace.detail?.files || []).filter(f=>f.kind==='mutation' && `${f.name} ${f.mutation?.strategy}`.toLowerCase().includes(query.toLowerCase()));
-  const create=()=>workspace.mutate({seed,count,max_file_size:limit?Math.floor(Number(limit)*1024*1024):null,metadata_size:metadataSize,region,strategies:strategy==='default'?['header_boundary','chunk_length','truncation','signature','trailing']:[strategy]});
+  const maxMutations=workspace.health?.limits.max_mutations ?? 50;
+  const knownStrategies=workspace.health?.limits.strategies ?? Object.keys(strategyLabels);
+  const choices:[string,string][]=[['default','Default cycle: five strategies'],...knownStrategies.map(id=>[id,strategyLabels[id] ?? id.replace(/_/g,' ')] as [string,string])];
+  const parsedLimit=limit.trim()===''?null:Number(limit);
+  const invalidLimit=parsedLimit!==null && (!Number.isFinite(parsedLimit) || parsedLimit<1);
+  const manifest=workspace.mutationManifest;
+  const create=()=>workspace.mutate({seed,count,max_file_size:parsedLimit===null?null:Math.floor(parsedLimit*1024*1024),metadata_size:metadataSize,region,strategies:strategy==='default'?['header_boundary','chunk_length','truncation','signature','trailing']:[strategy]});
   return <main className="content"><PageHeader index="03" title="MUTATION ENGINE" description="Generate reproducible malformed test cases from the original file."/>
     <div className="content-rule"><span>AUTHORIZED LOCAL TESTING</span><span className="rule-line"/><span>ORIGINAL IS NEVER MODIFIED</span></div>
     <div className="two-column-layout"><div className="column-stack">
       <section className="panel"><PanelTitle number="01" title="MUTATION CONFIGURATION" sub="DETERMINISTIC"/>
         <div className="form-grid"><label>ORIGINAL INPUT<div className="input-readonly">{original?.name || 'No original file'}</div></label><label>STRATEGY<select value={strategy} onChange={e=>setStrategy(e.target.value)}>{choices.map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
-          <label>SEED<input type="number" min="0" max="4294967295" value={seed} onChange={e=>setSeed(Number(e.target.value))}/></label><label>VARIANT COUNT<input type="number" min="1" max="50" value={count} onChange={e=>setCount(Number(e.target.value))}/></label>
+          <label>SEED<input type="number" min="0" max="4294967295" value={seed} onChange={e=>setSeed(Number(e.target.value))}/></label><label>VARIANT COUNT<input type="number" min="1" max={maxMutations} value={count} onChange={e=>setCount(Number(e.target.value))}/></label>
           <label>MAX OUTPUT SIZE (MB)<input type="number" min="1" placeholder="No ceiling" value={limit} onChange={e=>setLimit(e.target.value)}/></label><label>BYTE MUTATION REGION<select value={region} onChange={e=>setRegion(e.target.value)} disabled={strategy!=='seeded_bytes'}><option value="any">Any structural region</option>{original?.analysis.chunks.map(c=><option value={c.id} key={c.id}>{c.name} / {hexOffset(c.offset)}</option>)}</select></label><label>METADATA VALUE LIMIT (BYTES)<input type="number" min="0" max="65536" value={metadataSize} disabled={strategy!=='metadata_value'} onChange={e=>setMetadataSize(Number(e.target.value))}/></label>
         </div>
-        <div className="form-footer"><span>{workspace.health?'Outputs are written to the dedicated local workspace.':'Start the local backend to write mutation files.'}</span><button className="btn btn-primary" disabled={!workspace.health||workspace.mode!=='backend'||workspace.busy||!original} onClick={create}><FlaskConical size={15}/> GENERATE VARIANTS</button></div>
+        <div className="form-footer"><span>{invalidLimit?'Enter a valid output ceiling of at least 1 MB, or leave the field blank.':workspace.health?'Outputs are written to the dedicated local workspace.':'Start the local backend to write mutation files.'}</span><button className="btn btn-primary" disabled={!workspace.health||workspace.mode!=='backend'||workspace.busy||!original||invalidLimit} onClick={create}><FlaskConical size={15}/> GENERATE VARIANTS</button></div>
       </section>
       <section className="panel"><PanelTitle number="02" title="GENERATED TEST CASES" sub={`${files.length} VISIBLE`} action={<label className="search-box"><Search size={13}/><input aria-label="Search generated test cases" placeholder="Search cases" value={query} onChange={e=>setQuery(e.target.value)}/></label>}/>
-        {files.length?<div className="case-list">{files.map(file=><div className={`case-row ${compared?.id===file.id?'selected':''}`} key={file.id}><div><strong>{file.name}</strong><span>{file.mutation?.strategy.replace(/_/g,' ').toUpperCase()} / SEED {file.mutation?.seed} / {formatBytes(file.analysis.size)}</span></div><button className="icon-btn" title="Inspect file" aria-label={`Inspect ${file.name}`} onClick={()=>onInspect(file.id)}><FileSearch size={16}/></button><button className="icon-btn" title="Compare bytes" aria-label={`Compare ${file.name}`} onClick={()=>setCompared(file)}><GitCompareArrows size={16}/></button><a className="icon-btn" href={api.downloadUrl(file.session_id,file.id)} download title="Download case" aria-label={`Download ${file.name}`}><ArrowDownToLine size={16}/></a></div>)}</div>:<div className="quiet-message">{query?'No test cases match this search.':'No variants have been generated in this session.'}</div>}
+        {manifest&&<div className="panel-note">LAST BATCH · SEED {manifest.seed} · REQUESTED {manifest.count_requested} · GENERATED {manifest.count_generated} · DEDUPLICATED {manifest.deduplicated?'YES':'NO'} · {manifest.strategies.join(' + ').replace(/_/g,' ').toUpperCase()}</div>}
+        {files.length?<div className="case-list">{files.map(file=><div className={`case-row ${compared?.id===file.id?'selected':''}`} key={file.id}><div><strong>{file.name}</strong><span>{file.mutation?.strategy.replace(/_/g,' ').toUpperCase()} / SEED {file.mutation?.seed} / {formatBytes(file.analysis.size)}</span></div><button className="icon-btn" title="Inspect file" aria-label={`Inspect ${file.name}`} onClick={()=>onInspect(file.id)}><FileSearch size={16}/></button><button className="icon-btn" title="Compare bytes" aria-label={`Compare ${file.name}`} onClick={()=>setCompared(file)}><GitCompareArrows size={16}/></button><button className="icon-btn" title="Download case" aria-label={`Download ${file.name}`} disabled={workspace.busy||!workspace.health} onClick={()=>void workspace.downloadFile(file)}><ArrowDownToLine size={16}/></button></div>)}</div>:<div className="quiet-message">{query?'No test cases match this search.':'No variants have been generated in this session.'}</div>}
       </section>
       {compared && <ByteComparison workspace={workspace} file={compared}/>}
     </div><div className="column-stack"><section className="panel"><PanelTitle title="ENGINE NOTES" sub="SAFE BY DESIGN"/><div className="notes-list"><div><span>01</span><p>Every variant starts from the unchanged original input.</p></div><div><span>02</span><p>The seed, selected strategy, exact edit offsets, and byte hashes are recorded.</p></div><div><span>03</span><p>Format-specific strategies require the corresponding structure. Unsupported combinations return an error.</p></div><div><span>04</span><p>No payload injection or automatic exploitation is performed.</p></div></div></section>

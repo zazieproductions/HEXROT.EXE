@@ -7,9 +7,9 @@ import { PanelTitle } from './Chrome';
 
 export interface AudioSeekRequest { token:number; offset:number }
 export interface PlaybackPosition { time:number; duration:number; byteOffset:number; chunkId:string|null }
-interface AudioRegion { chunk:Chunk|null; start:number; end:number }
+export interface AudioRegion { chunk:Chunk|null; start:number; end:number }
 
-function findAudioRegion(analysis:Analysis):AudioRegion {
+export function findAudioRegion(analysis:Analysis):AudioRegion {
   const chunk = analysis.chunks.find(item=>item.audio_offset!==undefined)
     || analysis.chunks.find(item=>item.kind==='audio')
     || analysis.chunks.find(item=>/^(data|ssnd)$/i.test(item.name.trim()));

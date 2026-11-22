@@ -68,18 +68,18 @@ def isolation_status() -> dict:
         if system == 'Linux':
             proc = subprocess.run(linux_base()+['/usr/bin/true'], capture_output=True, timeout=5)
             if proc.returncode != 0:
-                return {'available':False,'mechanism':'bubblewrap','reason':'Sandbox self-test failed: '+proc.stderr.decode(errors='replace')[:250]}
-            return {'available':True,'mechanism':'bubblewrap (network namespace)','reason':'Sandbox self-test passed; workers have no host home mount or network namespace access.'}
+                return {'available':False,'mechanism':'bubblewrap','egress':'unavailable','reason':'Sandbox self-test failed: '+proc.stderr.decode(errors='replace')[:250]}
+            return {'available':True,'mechanism':'bubblewrap (network namespace)','egress':'blocked','reason':'Sandbox self-test passed; workers have no host home mount or network namespace access.'}
         if system == 'Darwin':
             tool = '/usr/bin/sandbox-exec'
-            if not Path(tool).is_file(): return {'available':False,'mechanism':'macOS sandbox-exec','reason':'sandbox-exec is unavailable on this macOS installation.'}
+            if not Path(tool).is_file(): return {'available':False,'mechanism':'macOS sandbox-exec','egress':'unavailable','reason':'sandbox-exec is unavailable on this macOS installation.'}
             profile = _macos_self_test_profile()
             proc = subprocess.run([tool,'-p',profile,'/usr/bin/true'],capture_output=True,timeout=5)
-            if proc.returncode != 0: return {'available':False,'mechanism':'macOS sandbox-exec','reason':'Sandbox self-test failed: '+proc.stderr.decode(errors='replace')[:250]}
-            return {'available':True,'mechanism':'macOS sandbox-exec (experimental, unverified on Apple Silicon)','reason':'Sandbox self-test passed with deny-by-default profile; network and non-allowlisted file access are denied. This is not independently validated — use a disposable VM for high-risk files.'}
-        return {'available':False,'mechanism':'none','reason':'Only Linux bubblewrap and macOS sandbox-exec are supported.'}
+            if proc.returncode != 0: return {'available':False,'mechanism':'macOS sandbox-exec','egress':'unavailable','reason':'Sandbox self-test failed: '+proc.stderr.decode(errors='replace')[:250]}
+            return {'available':True,'mechanism':'macOS sandbox-exec (experimental, unverified on Apple Silicon)','egress':'blocked','reason':'Sandbox self-test passed with deny-by-default profile; network and non-allowlisted file access are denied. This is not independently validated — use a disposable VM for high-risk files.'}
+        return {'available':False,'mechanism':'none','egress':'unavailable','reason':'Only Linux bubblewrap and macOS sandbox-exec are supported.'}
     except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
-        return {'available':False,'mechanism':'OS sandbox','reason':f'Sandbox self-test failed: {exc}'}
+        return {'available':False,'mechanism':'OS sandbox','egress':'unavailable','reason':f'Sandbox self-test failed: {exc}'}
 
 
 def isolated_command(input_file: Path, decoder_command: list[str], memory_mb: int = 512, timeout: float = 5.0) -> tuple[list[str], list[str]]:
